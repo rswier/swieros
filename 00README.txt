@@ -1,4 +1,4 @@
-README.txt:
+00README.txt:
 
 Welcome to my synthetic CPU emulator, C compiler, and self-contained operating system.
 Here you will find the full source to everything you need to build and run a tiny Unix-like
@@ -216,4 +216,5 @@ I welcome your comments, suggestions, bug fixes, and improvements.  This is the 
 release of the code, and much is rough and unfinished.
 
 Robert Swierczek
+Email: rswier AT acm DOT org
 October 2014
