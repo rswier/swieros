@@ -320,9 +320,9 @@ int cpu(uint pc, int argc, char **argv)
 //      case S_getpeername:
 //      case S_getsockname:
       
-      default: dprintf(2,"unsupported trap cycle = %u pc = %u ir = %u a = %d b = %d c = %d", cycle, pc, ir, a, b, c); return -1;
+      default: dprintf(2,"unsupported trap cycle = %u pc = %08x ir = %08x a = %d b = %d c = %d", cycle, pc, ir, a, b, c); return -1;
       }
-    default:   dprintf(2,"unknown instruction cycle = %u pc = %u ir = %u\n", cycle, pc, ir); return -1;
+    default:   dprintf(2,"unknown instruction cycle = %u pc = %08x ir = %08x\n", cycle, pc, ir); return -1;
     }
   }
 }

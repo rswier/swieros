@@ -33,10 +33,10 @@ uchar buf[BUFSZ];
 uint bn;
 int disk;
 
-void xstrncpy(char *s, char *t, uint n) // no return value unlike strncpy
+void xstrncpy(char *s, char *t, int n) // no return value unlike strncpy
 {
-  while (n-- && (*s++ = *t++));
-  while (n--) *s++ = 0;
+  while (n-- > 0 && (*s++ = *t++));
+  while (n-- > 0) *s++ = 0;
 }
 
 void write_disk(void *b, uint n)

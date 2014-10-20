@@ -488,7 +488,7 @@ void cpu(uint pc, uint sp)
 
     // misc
     case BIN:  if (user) { trap = FPRIV; break; } a = kbchar; kbchar = -1; continue;  // XXX
-    case BOUT: if (user) { trap = FPRIV; break; } if (a != 1) { dprintf(2,"bad write a=%d\n",a); return; } a = write(a, &b, 1); continue;
+    case BOUT: if (user) { trap = FPRIV; break; } if (a != 1) { dprintf(2,"bad write a=%d\n",a); return; } ch = b; a = write(a, &ch, 1); continue;
     case SSP:  sp = a; continue;
 
     case NOP:  continue;

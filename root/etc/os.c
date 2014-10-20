@@ -212,15 +212,16 @@ splx(int e)     { if (e) asm(STI); }
 
 int strlen(void *s) { return memchr(s, 0, -1) - s; }
 
-xstrncpy(char *s, char *t, uint n) // no return value unlike strncpy XXX remove me only called once
+xstrncpy(char *s, char *t, int n) // no return value unlike strncpy XXX remove me only called once
 {
-  while (n-- && (*s++ = *t++));
-  while (n--) *s++ = 0;
+  while (n-- > 0 && (*s++ = *t++));
+  while (n-- > 0) *s++ = 0;
 }
 
-safestrcpy(char *s, char *t, uint n) // like strncpy but guaranteed to null-terminate.
+safestrcpy(char *s, char *t, int n) // like strncpy but guaranteed to null-terminate.
 {
-  while (--n && (*s++ = *t++));
+  if (n <= 0) return;
+  while (--n > 0 && (*s++ = *t++));
   *s = 0;
 }
 

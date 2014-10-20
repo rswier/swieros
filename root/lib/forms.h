@@ -247,7 +247,6 @@ void fl_add_object(FL_FORM *form, FL_OBJECT *ob)
   ob->form = form;
   form->last = ob;
   form->redraw = 1;
-  return ob;
 }
 
 void fl_delete_object(FL_OBJECT *ob)
@@ -642,14 +641,6 @@ int fl_draw_forms(void)
   FL_FORM *form; int redraw = 0;
   for (form = fl_forms; form; form = form->next) if (form->redraw) redraw |= fl_redraw_form(form);
   return redraw;
-}
-
-void fl_do_forms(void)
-{
-  int e, w, x, y;
-  if (fl_draw_forms()) swapbuffers();
-  e = qread(&w, &x, &y);
-  if (e != HANGUP) fl_handle_forms(e, w, x, y);  
 }
 
 int fl_initialize() //int argc, char *argv[], char *label, int x, int y)

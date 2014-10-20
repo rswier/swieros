@@ -582,7 +582,7 @@ next:
 
     // misc
     case BIN:  if (user) { trap = FPRIV; break; } a = kbchar; kbchar = -1; continue;  // XXX
-    case BOUT: if (user) { trap = FPRIV; break; } if (a != 1) { dprintf(2,"bad write a=%d\n",a); return; } a = write(a, &b, 1); continue;
+    case BOUT: if (user) { trap = FPRIV; break; } if (a != 1) { dprintf(2,"bad write a=%d\n",a); return; } ch = b; a = write(a, &ch, 1); continue;
     case SSP:  xsp = a; tsp = fsp = 0; goto fixsp;
 
     case NOP:  continue;
@@ -748,7 +748,6 @@ int main(int argc, char *argv[])
   twu = (uint *) new(TB_SZ * sizeof(uint)); // user write table
   tr = trk;
   tw = twk;
-      
 
   if (verbose) dprintf(2,"%s : emulating %s\n", cmd, file);
   cpu(hdr.entry, memsz - FS_SZ);

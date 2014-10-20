@@ -501,7 +501,7 @@ int main(int argc, char *argv[])
   for (i=1; i<argc; i++) {
     if (!strcmp(argv[i],"-v")) verbose = 1;
     else if (!strcmp(argv[i],"-I")) server = 0;
-    else if (!strcmp(argv[i],"-d")) debug = 1;
+    else if (!strcmp(argv[i],"-d")) verbose = debug = 1;
     else if (!strcmp(argv[i],"-p") && i+1 < argc) port = atoi(argv[++i]);
     else fatal("usage: srv [-v] [-d] [-p port]");
   }

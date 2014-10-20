@@ -25,5 +25,13 @@ enum {
   INADDR_ANY = 0,
 };
 
-uint htonl(uint a) { return (a >> 24) | ((a >> 8) & 0xff00) | ((a << 8) & 0xff0000) | (a << 24); }
-ushort htons(ushort a) { return (a >> 8) | (a << 8); }
+uint htonl(uint a)
+{
+  uint bigend = 1;
+  return ((char *)&bigend)[3] ? a : ((a >> 24) | ((a >> 8) & 0xff00) | ((a << 8) & 0xff0000) | (a << 24));
+}
+ushort htons(ushort a)
+{
+  uint bigend = 1;
+  return ((char *)&bigend)[3] ? a : ((a >> 8) | (a << 8));
+}

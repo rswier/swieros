@@ -17,7 +17,7 @@ files to see how everything works (for each xyz.bat, there is an equivalent xyz.
 
 Here's what is in the package:
 
-    README.txt     - This file.
+    00README.txt   - This file.
     bhello.bat     - Test the compiler and emulator with a few hello worlds (good starting point.)
     bos.bat        - Demonstrate some techniques that the OS uses.
     recurse.bat    - Demonstrate recursive emulation.
@@ -118,7 +118,7 @@ for endless extensions, improvements, and new radical ideas.
     root/use/demo/gears.c  - OpenGL 3-D gear wheels
     root/usr/demo/sdk.c    - Curses SUDOKU solver (requires ANSI for Windows, or launch within /bin/vt).
 
-Tutorial walkthru:
+Tutorial Walkthru:
 
 Here are some step-by-step instructions to get started.  The prompt of "Win# >" will be used
 to indicate you are at the Host Command Prompt, and "Win# $" will be used when you are inside
@@ -185,7 +185,7 @@ For the grand finale, lets run the OS inside itself using self-emulation:
 
 That's all for now.
 
-To-do list:
+To-Do List:
 
     Code cleanup and fixes for XXX items.
     Fix occasional CPU exception on pipe read/write.
@@ -216,5 +216,4 @@ I welcome your comments, suggestions, bug fixes, and improvements.  This is the 
 release of the code, and much is rough and unfinished.
 
 Robert Swierczek
-Email: rswier AT acm DOT org
 October 2014

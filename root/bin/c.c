@@ -98,8 +98,9 @@ int tk,       // current token
 ident_t *id;  // current parsed identifier
 double fval;  // current token double value
 uint ty,      // current parsed subexpression type
-     rt;      // current parsed function return type
-     
+     rt,      // current parsed function return type
+     bigend;  // big-endian machine
+
 char *file,   // input file name
      *cmd,    // command name
      *incl,   // include path
@@ -666,6 +667,12 @@ uint *type(uint *t, ident_t **v, uint bt)
         n->class = Auto;
         n->type = d;
         n->val = p*8 + 8;
+        if (bigend) {
+          switch (d) {
+          case CHAR: case UCHAR: n->val += 3; break;
+          case SHORT: case USHORT: n->val += 2;
+          }
+        }
       }
       pt |= (d == DOUBLE ? 1 : (d < UINT ? 2 : 3)) << p*2;
       if (tk == Comma) next(); // XXX desparately need to flag an error if not a comma or close paren!
@@ -2155,6 +2162,8 @@ int main(int argc, char *argv[])
   ts = ip = (int) new(SEG_SZ);
   gs      = (int) new(SEG_SZ);
   va = vp = (int) new(VAR_SZ);
+
+  bigend = 1; bigend = ((char *)&bigend)[3];
 
   pos = "asm auto break case char continue default do double else enum float for goto if int long return short "
         "sizeof static struct switch typedef union unsigned void while va_list va_start va_arg main";
