@@ -216,4 +216,5 @@ I welcome your comments, suggestions, bug fixes, and improvements.  This is the 
 release of the code, and much is rough and unfinished.
 
 Robert Swierczek
+Email: rswier AT acm DOT org
 October 2014
