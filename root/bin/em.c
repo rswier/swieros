@@ -704,8 +704,8 @@ int main(int argc, char *argv[])
   char *file, *fs;
   struct stat st;
   
-  if (argc < 2) usage();
   cmd = *argv++;
+  if (argc < 2) usage();
   file = *argv;
   memsz = MEM_SZ;
   fs = 0;
