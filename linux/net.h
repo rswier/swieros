@@ -2,6 +2,7 @@
 // Allows a few specific programs to compile and run under linux.
 
 #include <netinet/in.h>
+#include <sys/select.h>
 
 int xsocket(int family, int ty, int protocol)
 {
