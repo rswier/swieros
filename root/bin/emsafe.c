@@ -589,7 +589,7 @@ interrupt:
     pc = ivec;
   }
 fatal:
-  dprintf(2,"processor halted! cycle = %u pc = %u ir = %u sp = %u a = %d b = %d c = %d trap = %u\n", cycle, pc, ir, sp, a, b, c, trap);
+  dprintf(2,"processor halted! cycle = %u pc = %08x ir = %08x sp = %08x a = %d b = %d c = %d trap = %u\n", cycle, pc, ir, sp, a, b, c, trap);
 }
 
 usage()
@@ -605,8 +605,8 @@ int main(int argc, char *argv[])
   char *file, *fs;
   struct stat st;
   
-  if (argc < 2) usage();
   cmd = *argv++;
+  if (argc < 2) usage();
   file = *argv;
   memsz = MEM_SZ;
   fs = 0;
@@ -649,7 +649,7 @@ int main(int argc, char *argv[])
   twu = (uint *) new(TB_SZ * sizeof(uint)); // user write table
   tr = trk;
   tw = twk;
-      
+
   if (verbose) dprintf(2,"%s : emulating %s\n", cmd, file);
   cpu(hdr.entry, memsz - FS_SZ);
   return 0;
