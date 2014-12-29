@@ -207,8 +207,7 @@ Credits:
     The emulator virtual memory implementation is a variation of the technique used
     in the Javascript PC Emulator written by Fabrice Bellard.
     
-    Code based on other sources includes acknowledgment within each file (please
-    let me know if I missed anybody!)
+    Code based on other sources includes acknowledgment within each file.
 
     All other original code is Copyright 2014 Robert Swierczek.
 

@@ -14,6 +14,7 @@
 
 #define NOFILE 16 // XXX subject to change
 #define NAME_MAX 256
+#undef PATH_MAX
 #define PATH_MAX 256
 
 enum { xCLOSED, xCONSOLE, xFILE, xSOCKET, xDIR };
@@ -239,7 +240,7 @@ int exec(char *path, char **argv) { printf("exec() not implemented\n"); exit(-1)
 int mknod(char *path, int mode, int dev) { printf("mknod() not implemented\n"); exit(-1); }
 int link(char *old, char *new) { printf("link() not implemented\n"); exit(-1); }
 int getpid(void) { printf("getpid() not implemented\n"); exit(-1); }
-int sleep(int n) { printf("sleep() not implemented\n"); exit(-1); }
+int xsleep(int n) { printf("sleep() not implemented\n"); exit(-1); }
 int uptime(void) { printf("uptime() not implemented\n"); exit(-1); }
 int mount(char *spec, char *dir, int rwflag) { printf("mount() not implemented\n"); exit(-1); }
 int umount(char *spec) { printf("umount() not implemented\n"); exit(-1); }
@@ -265,3 +266,4 @@ int main(int argc, char *argv[])
 #define stat     xstat
 #define fstat    xfstat
 #define main     xmain
+#define sleep    xsleep
