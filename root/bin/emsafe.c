@@ -41,7 +41,7 @@ enum {           // processor fault codes (some can be masked together)
 };
 
 uint verbose,    // chatty option -v
-  mem, memsz,    // physical memory
+  memsz,         // physical memory size
   user,          // user mode
   iena,          // interrupt enable
   ipend,         // interrupt pending
@@ -49,12 +49,15 @@ uint verbose,    // chatty option -v
   ivec,          // interrupt vector
   vadr,          // bad virtual address
   paging,        // virtual memory enabled
-  pdir,          // page directory
   tpage[TPAGES], // valid page translations
-  tpages,        // number of cached page translations
+  tpages;        // number of cached page translations
+
+ulong
   *trk, *twk,    // kernel read/write page transation tables
   *tru, *twu,    // user read/write page transation tables
-  *tr,  *tw;     // current read/write page transation tables
+  *tr,  *tw,     // current read/write page transation tables
+  mem,           // physical memory
+  pdir;          // page directory
 
 char *cmd;       // command name
 
@@ -62,10 +65,10 @@ void *new(int size)
 {
   void *p;
   if ((p = sbrk((size + 7) & -8)) == (void *)-1) { dprintf(2,"%s : fatal: unable to sbrk(%d)\n", cmd, size); exit(-1); }
-  return (void *)(((int)p + 7) & -8);
+  return (void *)(((long)p + 7) & -8);
 }
 
-flush()
+void flush(void)
 {
   uint v; 
 //  static int xx; if (tpages >= xx) { xx = tpages; dprintf(2,"****** flush(%d)\n",tpages); }
@@ -76,23 +79,24 @@ flush()
   }
 }
 
-uint setpage(uint v, uint p, uint writable, uint userable)
+ulong setpage(uint v, uint p, uint writable, uint userable)
 {
+  ulong pp;
   if (p >= memsz) { trap = FMEM; vadr = v; return 0; }
-  p = ((v ^ (mem + p)) & -4096) + 1;
+  pp = ((v ^ (mem + p)) & -4096) + 1;
   if (!trk[v >>= 12]) {
     if (tpages >= TPAGES) flush();
     tpage[tpages++] = v;
   }
 //  if (verbose) printf(".");
-  trk[v] = p;
-  twk[v] = writable ? p : 0;
-  tru[v] = userable ? p : 0;
-  twu[v] = (userable && writable) ? p : 0;
-  return p;
+  trk[v] = pp;
+  twk[v] = writable ? pp : 0;
+  tru[v] = userable ? pp : 0;
+  twu[v] = (userable && writable) ? pp : 0;
+  return pp;
 }
   
-uint rlook(uint v)
+ulong rlook(uint v)
 {
   uint pde, *ppde, pte, *ppte, q, userable;
 //  dprintf(2,"rlook(%08x)\n",v);
@@ -112,7 +116,7 @@ uint rlook(uint v)
   return 0;
 }
 
-uint wlook(uint v)
+ulong wlook(uint v)
 {
   uint pde, *ppde, pte, *ppte, q, userable;
 //  dprintf(2,"wlook(%08x)\n",v);
@@ -134,7 +138,9 @@ uint wlook(uint v)
 
 void cpu(uint pc, uint sp)
 {
-  uint a, b, c, ssp, usp, t, p, v, u, cycle, timer, timeout, xpc, ppc, delta;
+  uint a, b, c, ssp, usp, t, v, u, cycle, timer, timeout, xpc, delta;
+  ulong p, ppc, tt;
+
   double f, g;
   int ir, kbchar;
   char ch;
@@ -207,11 +213,11 @@ void cpu(uint pc, uint sp)
     // memory -- designed to be restartable/continuable after exception/interrupt
     case MCPY: // while (c) { *a = *b; a++; b++; c--; }
       while (c) {
-        if (!(t = tr[b >> 12]) && !(t = rlook(b))) goto exception;
+        if (!(tt = tr[b >> 12]) && !(tt = rlook(b))) goto exception;
         if (!(p = tw[a >> 12]) && !(p = wlook(a))) goto exception;
         if ((v = 4096 - (a & 4095)) > c) v = c;
         if ((u = 4096 - (b & 4095)) > v) u = v;
-        memcpy((char *)(a ^ (p & -2)), (char *)(b ^ (t & -2)), u);
+        memcpy((char *)(a ^ (p & -2)), (char *)(b ^ (tt & -2)), u);
         a += u; b += u; c -= u;
 //        if (!(++cycle % DELTA)) { pc -= 4; break; } XXX
       }
@@ -220,11 +226,11 @@ void cpu(uint pc, uint sp)
     case MCMP: // for (;;) { if (!c) { a = 0; break; } if (*b != *a) { a = *b - *a; b += c; c = 0; break; } a++; b++; c--; }
       for (;;) {
         if (!c) { a = 0; break; }
-        if (!(t = tr[b >> 12]) && !(t = rlook(b))) goto exception;
+        if (!(tt = tr[b >> 12]) && !(tt = rlook(b))) goto exception;
         if (!(p = tr[a >> 12]) && !(p = rlook(a))) goto exception;
         if ((v = 4096 - (a & 4095)) > c) v = c;
         if ((u = 4096 - (b & 4095)) > v) u = v;
-        if (t = memcmp((char *)(a ^ (p & -2)), (char *)(b ^ (t & -2)), u)) { a = t; b += c; c = 0; break; }
+        if (t = memcmp((char *)(a ^ (p & -2)), (char *)(b ^ (tt & -2)), u)) { a = t; b += c; c = 0; break; }
         a += u; b += u; c -= u;
 //        if (!(++cycle % DELTA)) { pc -= 4; break; } XXX
       }
@@ -235,7 +241,7 @@ void cpu(uint pc, uint sp)
         if (!c) { a = 0; break; }
         if (!(p = tr[a >> 12]) && !(p = rlook(a))) goto exception;
         if ((u = 4096 - (a & 4095)) > c) u = c;
-        if (t = (uint)memchr((char *)(v = a ^ (p & -2)), b, u)) { a += t - v; c = 0; break; } 
+        if (tt = (ulong)memchr((char *)(p = a ^ (p & -2)), b, u)) { a += tt - p; c = 0; break; } 
         a += u; c -= u;
 //        if (!(++cycle % DELTA)) { pc -= 4; break; } XXX
       }
@@ -573,7 +579,7 @@ void cpu(uint pc, uint sp)
       continue;
     case NET9: if (user) { trap = FPRIV; break; }
       // XXX if ((unknown || !ready) && !poll()) return -1;
-      a = accept(a, (void *)b, (void *)c); // XXX cant do this with virtual addresses!!!
+//      a = accept(a, (void *)b, (void *)c); // XXX cant do this with virtual addresses!!!
       continue;
     
     default: trap = FINST; break;
@@ -592,7 +598,7 @@ fatal:
   dprintf(2,"processor halted! cycle = %u pc = %08x ir = %08x sp = %08x a = %d b = %d c = %d trap = %u\n", cycle, pc, ir, sp, a, b, c, trap);
 }
 
-usage()
+void usage(void)
 { 
   dprintf(2,"%s : usage: %s [-v] [-m memsize] [-f filesys] file\n", cmd, cmd);
   exit(-1);
@@ -621,7 +627,7 @@ int main(int argc, char *argv[])
   }
   
   if (verbose) dprintf(2,"mem size = %u\n",memsz);
-  mem = (((int) new(memsz + 4096)) + 4095) & -4096;
+  mem = (((long) new(memsz + 4096)) + 4095) & -4096;
   
   if (fs) {
     if (verbose) dprintf(2,"%s : loading ram file system %s\n", cmd, fs);
@@ -643,10 +649,10 @@ int main(int argc, char *argv[])
 //  if (verbose) dprintf(2,"entry = %u text = %u data = %u bss = %u\n", hdr.entry, hdr.text, hdr.data, hdr.bss);
 
   // setup virtual memory
-  trk = (uint *) new(TB_SZ * sizeof(uint)); // kernel read table
-  twk = (uint *) new(TB_SZ * sizeof(uint)); // kernel write table
-  tru = (uint *) new(TB_SZ * sizeof(uint)); // user read table
-  twu = (uint *) new(TB_SZ * sizeof(uint)); // user write table
+  trk = (ulong *) new(TB_SZ * sizeof(ulong)); // kernel read table
+  twk = (ulong *) new(TB_SZ * sizeof(ulong)); // kernel write table
+  tru = (ulong *) new(TB_SZ * sizeof(ulong)); // user read table
+  twu = (ulong *) new(TB_SZ * sizeof(ulong)); // user write table
   tr = trk;
   tw = twk;
 

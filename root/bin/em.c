@@ -62,10 +62,10 @@ void *new(int size)
 {
   void *p;
   if ((p = sbrk((size + 7) & -8)) == (void *)-1) { dprintf(2,"%s : fatal: unable to sbrk(%d)\n", cmd, size); exit(-1); }
-  return (void *)(((int)p + 7) & -8);
+  return (void *)(((long)p + 7) & -8);
 }
 
-flush()
+void flush(void)
 {
   uint v; 
 //  static int xx; if (tpages >= xx) { xx = tpages; dprintf(2,"****** flush(%d)\n",tpages); }
@@ -691,7 +691,7 @@ fatal:
   dprintf(2,"processor halted! cycle = %u pc = %08x ir = %08x sp = %08x a = %d b = %d c = %d trap = %u\n", cycle + (int)((uint)xpc - xcycle)/4, (uint)xpc - tpc, ir, xsp - tsp, a, b, c, trap);
 }
 
-usage()
+void usage(void)
 { 
   dprintf(2,"%s : usage: %s [-v] [-m memsize] [-f filesys] file\n", cmd, cmd);
   exit(-1);

@@ -78,7 +78,7 @@ void write_meta(uint size, uint mode, uint nlink)
   }
 }
 
-add_dir(uint parent, struct direct *sp)
+void add_dir(uint parent, struct direct *sp)
 {
   uint size, dsize, dseek, nlink = 2;
   int f, n, i;
@@ -106,7 +106,7 @@ add_dir(uint parent, struct direct *sp)
   parent = bn;
   
   // write inode
-  write_meta(dsize = (uint)sp - (uint)de, S_IFDIR, nlink);  
+  write_meta(dsize = (char *)sp - (char *)de, S_IFDIR, nlink);  
   dseek = (bn - ((dsize + 4095) / 4096)) * 4096;
 
   // write directory
@@ -117,9 +117,9 @@ add_dir(uint parent, struct direct *sp)
   for (p = de + 2; p < sp; p++) {
     size = p->d_ino; p->d_ino = bn;
     if (size == -1) { // subdirectory
-      chdir(p->d_name);
+      if (chdir(p->d_name)) { dprintf(2, "chdir(%s) failed\n", p->d_name); exit(-1); }
       add_dir(parent, sp);
-      chdir("..");
+      if (chdir("..")) { dprintf(2, "chdir(..) failed\n"); exit(-1); }
     } else { // file
       write_meta(size, S_IFREG, 1);
       if (size) {
@@ -148,16 +148,16 @@ int main(int argc, char *argv[])
   
   if (argc != 3) { dprintf(2, "Usage: mkfs fs rootdir\n"); return -1; }
   if ((disk = open(argv[1], O_RDWR | O_CREAT | O_TRUNC)) < 0) { dprintf(2, "open(%s) failed\n", argv[1]); return -1; }
-  if ((int)(sp = (struct direct *) sbrk(16*1024*1024)) == -1) { dprintf(2, "sbrk() failed\n"); return -1; }
+  if ((sp = (struct direct *) sbrk(16*1024*1024)) == (struct direct *)-1) { dprintf(2, "sbrk() failed\n"); return -1; }
 
   // write zero bitmap
   write_disk(buf, BUFSZ);
   
   // populate file system
-  getcwd(cwd, sizeof(cwd));
-  chdir(argv[2]);
+  if (!getcwd(cwd, sizeof(cwd))) { dprintf(2, "getcwd(%s) failed\n", cwd); exit(-1); }
+  if (chdir(argv[2])) { dprintf(2, "chdir(%s) failed\n", argv[2]); exit(-1); }
   add_dir(bn = 16, sp);
-  chdir(cwd);
+  if (chdir(cwd)) { dprintf(2, "chdir(%s) failed\n", cwd); exit(-1); }
 
   // update bitmap
   memset(buf, 0xff, bn / 8);

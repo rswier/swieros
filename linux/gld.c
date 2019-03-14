@@ -2,6 +2,7 @@
 
 // XXX initial implementation
 
+#include <unistd.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -115,8 +116,8 @@ void winopen(int id, char *title) // XXX needs work
   attr.event_mask = StructureNotifyMask | ExposureMask | ButtonPressMask | ButtonReleaseMask | 
     ExposureMask | Button1MotionMask | Button3MotionMask | KeyPressMask;
 //  mask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
-  mask = CWBorderPixel | CWBitGravity | CWEventMask;
-
+//  mask = CWBorderPixel | CWBitGravity | CWEventMask;
+  mask = CWBackPixmap | CWBorderPixel | CWColormap | CWEventMask;
   w->win = XCreateWindow(display, root, pos_x, pos_y, pos_w, pos_h, 0, visinfo->depth, InputOutput, visinfo->visual, mask, &attr);
 
   wmDelete = XInternAtom(display, "WM_DELETE_WINDOW", True);                 
@@ -139,7 +140,7 @@ void winopen(int id, char *title) // XXX needs work
 
 void txmsg(int msg, int win, int p1, int p2)
 {
-  int m[4] = {msg, win, p1, p2}; // XXX shrink this?
+  int32_t m[4] = {msg, win, p1, p2}; // XXX shrink this?
   if (send(sd, (char *) m, 16, 0) != 16) { if (debug) printf("txmsg() failed quit=1\n"); quit = 1; }
 }
 
@@ -167,9 +168,9 @@ void rx(void *p, int n)
     p += r; 
   }
 }
-int rx4(void)
+int32_t rx4(void)
 {
-  int i;
+  int32_t i;
   if (rxbuf(sd, (char *) &i, 4) != 4) { if (debug) printf("rx4() failed quit=1\n"); quit = 1; return -1; }
   nrx += 4;
   return i;
@@ -177,7 +178,7 @@ int rx4(void)
 
 void rxmsg(void)
 {
-  union { int i; float f; } p[16]; int n;
+  union { int32_t i; float f; } p[16]; int n;
   static char s[2048]; // XXX
   char *pixels;
   
@@ -387,6 +388,8 @@ int main(int argc, char *argv[])
       if (!(display = XOpenDisplay(dpyname))) fatal("XOpenDisplay()");
       scrnum = DefaultScreen(display);
       root = RootWindow(display, scrnum);
+
+      if (!glXQueryExtension(display, 0, 0)) fatal("X Server doesn't support GLX extension");
       if (!(visinfo = glXChooseVisual(display, scrnum, attribs))) fatal("couldn't get an RGB, Double-buffered visual\n");
       
       event_loop();
