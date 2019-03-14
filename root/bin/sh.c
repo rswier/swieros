@@ -154,7 +154,7 @@ char *gets(char *s)
   char *p; int c;
   for (p = s;;) {
     if ((c = getchar()) == -1) return 0;
-    if (c == '\b') {
+    if (c == '\b' || c == 127) {
       if (p > s) { if (interactive) write(1,"\b \b",3); p--; }
     } else if (c == '\r' || c == '\n' || c >= ' ') {
       if (interactive) write(1,&c,1);
