@@ -7,7 +7,7 @@ enum {
   NOFILE  = 16,         // open files per process
   NFILE   = 100,        // open files per system
   NBUF    = 10,         // size of disk block cache
-  NINODE  = 50,         // maximum number of active i-nodes  XXX make this more dynamic ... 
+  NINODE  = 50,         // maximum number of active i-nodes  XXX make this more dynamic ...
   NDEV    = 10,         // maximum major device number
   USERTOP = 0xc0000000, // end of user address space
   P2V     = +USERTOP,   // turn a physical address into a virtual address
@@ -279,7 +279,7 @@ printf(char *f, ...) // XXX simplify or chuck
 panic(char *s)
 {
   asm(CLI);
-  out(1,'p'); out(1,'a'); out(1,'n'); out(1,'i'); out(1,'c'); out(1,':'); out(1,' '); 
+  out(1,'p'); out(1,'a'); out(1,'n'); out(1,'i'); out(1,'c'); out(1,':'); out(1,' ');
   while (*s) out(1,*s++);
   out(1,'\n');
   asm(HALT);
@@ -367,16 +367,16 @@ iderw(struct buf *b) // XXX rename?!
 // buffer cache:
 // The buffer cache is a linked list of buf structures holding cached copies of disk block contents.  Caching disk blocks.
 // in memory reduces the number of disk reads and also provides a synchronization point for disk blocks used by multiple processes.
-// 
+//
 // Interface:
 // * To get a buffer for a particular disk block, call bread.
 // * After changing buffer data, call bwrite to write it to disk.
 // * When done with the buffer, call brelse.
 // * Do not use the buffer after calling brelse.
 // * Only one process at a time can use a buffer, so do not keep them longer than necessary.
-// 
+//
 // The implementation uses three state flags internally:
-// * B_BUSY: the block has been returned from bread and has not been passed back to brelse.  
+// * B_BUSY: the block has been returned from bread and has not been passed back to brelse.
 // * B_VALID: the buffer data has been read from the disk.
 // * B_DIRTY: the buffer data has been modified and needs to be written to disk.
 binit()
@@ -399,7 +399,7 @@ binit()
 struct buf *bget(uint sector)
 {
   struct buf *b; int e = splhi();
-  
+
 loop:  // try for cached block
   for (b = bfreelist.next; b != &bfreelist; b = b->next) {
     if (b->sector == sector) {
@@ -522,18 +522,18 @@ bfree(uint b)
 //
 // The kernel keeps a cache of the in-use on-disk structures to provide a place for synchronizing access
 // to inodes shared between multiple processes.
-// 
+//
 // ip->ref counts the number of pointer references to this cached inode; references are typically kept in
 // struct file and in u->cwd.  When ip->ref falls to zero, the inode is no longer cached.  It is an error
 // to use an inode without holding a reference to it.
 //
 // Processes are only allowed to read and write inode metadata and contents when holding the inode's lock,
-// represented by the I_BUSY flag in the in-memory copy.  Because inode locks are held during disk accesses, 
+// represented by the I_BUSY flag in the in-memory copy.  Because inode locks are held during disk accesses,
 // they are implemented using a flag rather than with spin locks.  Callers are responsible for locking
 // inodes before passing them to routines in this file; leaving this responsibility with the caller makes
 // it possible for them to create arbitrarily-sized atomic operations.
 //
-// To give maximum control over locking to the callers, the routines in this file that return inode pointers 
+// To give maximum control over locking to the callers, the routines in this file that return inode pointers
 // return pointers to *unlocked* inodes.  It is the callers' responsibility to lock them before using them.
 // A non-zero ip->ref keeps these unlocked inodes in the cache.
 
@@ -561,7 +561,7 @@ struct inode *iget(uint inum)
   ip->ref = 1;
   ip->flags = 0;
   splx(e);
-  
+
   return ip;
 }
 
@@ -620,7 +620,7 @@ ilock(struct inode *ip)
   while (ip->flags & I_BUSY) sleep(ip);
   ip->flags |= I_BUSY;
   splx(e);
-  
+
   if (!(ip->flags & I_VALID)) {
     bp = bread(ip->inum);
     dip = (struct dinode *)bp->data;
@@ -660,7 +660,7 @@ iput(struct inode *ip)
     splx(e);
     itrunc(ip);
     ip->mode = 0;
-    bfree(ip->inum); 
+    bfree(ip->inum);
     e = splhi();
     ip->flags = 0;
     wakeup(ip);
@@ -718,7 +718,7 @@ itrunc(struct inode *ip)
     bfree(ip->dir[i]);
     ip->dir[i] = 0;
   }
-  
+
   for (i = 0; i < NIDIR; i++) {
     if (!ip->idir[i]) break;
     bp = bread(ip->idir[i]);
@@ -802,7 +802,7 @@ int writei(struct inode *ip, char *src, uint off, uint n)
 }
 
 // directories:
-int namecmp(char *p, char *q) 
+int namecmp(char *p, char *q)
 {
   uint n = DIRSIZ;
   while (n) { if (!*p || *p != *q) return *p - *q; n--; p++; q++; } // XXX
@@ -845,7 +845,7 @@ int dirlink(struct inode *dp, char *name, uint inum)
   xstrncpy(de.d_name, name, DIRSIZ);
   de.d_ino = inum;
   if (writei(dp, (char *)&de, off, sizeof(de)) != sizeof(de)) panic("dirlink");
-  
+
   return 0;
 }
 
@@ -899,7 +899,7 @@ struct inode *namei(char *path)
   struct inode *ip, *next;
 
   if (*path == '/') ip = iget(ROOTINO); else idup(ip = u->cwd);
-  
+
   while (path = skipelem(path, name)) {
     ilock(ip);
     if ((ip->mode & S_IFMT) != S_IFDIR || !(next = dirlookup(ip, name, 0))) {
@@ -917,7 +917,7 @@ struct inode *nameiparent(char *path, char *name)
   struct inode *ip, *next;
 
   if (*path == '/') ip = iget(ROOTINO); else idup(ip = u->cwd);
-  
+
   while (path = skipelem(path, name)) {
     ilock(ip);
     if ((ip->mode & S_IFMT) != S_IFDIR) {
@@ -1078,7 +1078,7 @@ int svalid(uint s) { return (s < u->sz) && memchr(s, 0, u->sz - s); }
 int mvalid(uint a, int n) { return a <= u->sz && a+n <= u->sz; }
 struct file *getf(uint fd) { return (fd < NOFILE) ? u->ofile[fd] : 0; }
 
-int sockopen(int family, int type, int protocol) { asm(LL,8); asm(LBL,16); asm(LCL,24); asm(NET1); }  
+int sockopen(int family, int type, int protocol) { asm(LL,8); asm(LBL,16); asm(LCL,24); asm(NET1); }
 sockclose(int sd) { asm(LL,8); asm(NET2); } // XXX
 int sockconnect(int fd, uint family_port, uint addr) { asm(LL, 8); asm(LBL,16); asm(LCL,24); asm(NET3); }
 int sockread (int sd, char *addr, int n) { asm(LL,8); asm(LBL,16); asm(LCL,24); asm(NET4); }
@@ -1107,7 +1107,7 @@ int sockrx(int sd, void *p, int n) // XXX this is always going to be slow until 
 //    while (!sockpoll(sd)) { cy = cyc(); for (r = 0; r < 10; r++) { nyc = cyc(); printf("[%d]",nyc - cy); cy = nyc; ssleep(1); } } // XXX needs to block properly XXX should I lock the inode?
     if ((r = sockread(sd, p, n)) <= 0) { printf("sockrx() sockread()\n"); return -1; } //  XXX <= 0?
     n -= r;
-    p += r; 
+    p += r;
   }
   return 0;
 }
@@ -1125,7 +1125,7 @@ fileclose(struct file *f)
   f->ref = 0;
   f->type = FD_NONE;
   splx(e);
-  
+
   switch (ff.type) {
   case FD_PIPE:   pipeclose(ff.pipe, ff.writable); break;
   case FD_INODE:  iput(ff.ip); break;
@@ -1274,7 +1274,7 @@ int unlink(char *path)
   struct direct de;
   char name[DIRSIZ];
   uint off;
-  
+
   if (!svalid(path) || !(dp = nameiparent(path, name))) return -1;
   ilock(dp);
 
@@ -1295,7 +1295,7 @@ bad:
     dp->nlink--;
     iupdate(dp);
   }
-  
+
   iunlockput(dp);
 
   ip->nlink--;
@@ -1367,7 +1367,7 @@ int mkdir(char *path)
 
 int mknod(char *path, int mode, int dev)
 {
-  struct inode *ip;    
+  struct inode *ip;
   if (!svalid(path) || !(ip = create(path, mode, dev))) return -1;
   iunlockput(ip);
   return 0;
@@ -1439,7 +1439,7 @@ int exec(char *path, char **argv)
     if (!svalid(argv[argc])) return -1;
   }
 
-  if (c = !(ip = namei(path))) {  
+  if (c = !(ip = namei(path))) {
     memcpy(cpath, path, i = strlen(path));
     cpath[i] = '.';
     cpath[i+1] = 'c';
@@ -1468,10 +1468,10 @@ int exec(char *path, char **argv)
     n = (sz - i < PAGE) ? sz - i : PAGE;
     if (readi(ip, P2V+(*pte & -PAGE), i, n) != n) goto bad;
   }
-  
+
   iunlockput(ip);
   ip = 0;
-  
+
   // allocate bss and stack segment
   if (!(sz = allocuvm(pd, sz, sz + hdr.bss + STACKSZ, 0))) goto bad;
 
@@ -1506,7 +1506,7 @@ bad:
   for (last=s=path; *s; s++)
     if (*s == '/') last = s+1;
   safestrcpy(u->name, last, sizeof(u->name));
-  
+
   // commit to the user image
   oldpd = u->pdir;
   u->pdir = pd;
@@ -1766,11 +1766,11 @@ int accept(int fd, uint *addr, int *addrlen) // XXXX params!!!! accept(int,*|0,*
   int sd;
   struct file *f;
   if (!(f = getf(fd))) return -1;
-  
+
   while (!sockpoll(f->off)) ssleep(1); // XXX
 
   if ((sd = sockaccept(f->off, 0, 0)) < 0) return sd; // XXX null params for now
-  
+
   if (!(f = filealloc()) || (fd = fdalloc(f)) < 0) { // XXX do this before sockaccept?
     if (f) fileclose(f);
     return -1;
@@ -1833,7 +1833,7 @@ found:
   // allocate kernel stack leaving room for trap frame
   sp = (p->kstack = kalloc()) + PAGE - sizeof(struct trapframe);
   p->tf = (struct trapframe *)sp;
-  
+
   // set up new context to start executing at forkret
   sp -= 8;
   *(uint *)sp = (uint)forkret;
@@ -1846,11 +1846,11 @@ found:
 init_start()
 {
   char cmd[10], *argv[2];
-  
+
   // no data/bss segment
   cmd[0] = '/'; cmd[1] = 'e'; cmd[2] = 't'; cmd[3] = 'c'; cmd[4] = '/';
   cmd[5] = 'i'; cmd[6] = 'n'; cmd[7] = 'i'; cmd[8] = 't'; cmd[9] = 0;
-  
+
   argv[0] = cmd;
   argv[1] = 0;
 
@@ -1926,7 +1926,7 @@ int allocuvm(uint *pd, uint oldsz, uint newsz, int create) // XXX rename grow() 
   uint va;
   if (newsz > USERTOP) return 0; // XXX make sure this never happens...
   if (newsz <= oldsz) panic("allocuvm: newsz <= oldsz"); // XXX do pre-checking in caller, no more post-checking needed
-  
+
   va = (oldsz + PAGE-1) & -PAGE;
   while (va < newsz) {
     if (create)
@@ -1934,7 +1934,7 @@ int allocuvm(uint *pd, uint oldsz, uint newsz, int create) // XXX rename grow() 
     else
       mappage(pd, va, 0, PTE_W | PTE_U);
     va += PAGE;
-  }  
+  }
   return newsz; // XXX not needed if never fails
 }
 
@@ -1961,7 +1961,7 @@ int deallocuvm(uint *pd, uint oldsz, uint newsz) // XXX rename shrink() ?? //XXX
 
       if (*pte & PTE_P) {
         kfree(P2V+(*pte & -PAGE));
-        *pte = 0;      
+        *pte = 0;
       }
       va += PAGE;
     }
@@ -2013,12 +2013,12 @@ swtch(int *old, int new) // switch stacks
 scheduler()
 {
   int n;
-  
+
   for (n = 0; n < NPROC; n++) {  // XXX do me differently
     proc[n].next = &proc[(n+1)&(NPROC-1)];
     proc[n].prev = &proc[(n-1)&(NPROC-1)];
   }
-  
+
   u = &proc[0];
   pdir(V2P+(uint)(u->pdir));
   u->state = RUNNING;
@@ -2040,7 +2040,7 @@ sched() // XXX redesign this better
   }
   u = &proc[0];
   //printf("-");
-  
+
 found:
   u->state = RUNNING;
   if (p != u) {
@@ -2051,7 +2051,7 @@ found:
   //else printf("spin(%d)\n",u->pid);    XXX else do a wait for interrupt? (which will actually pend because interrupts are turned off here)
 }
 
-trap(uint *sp, double g, double f, int c, int b, int a, int fc, uint *pc)  
+trap(uint *sp, double g, double f, int c, int b, int a, int fc, uint *pc)
 {
   uint va;
   switch (fc) {
@@ -2094,7 +2094,7 @@ trap(uint *sp, double g, double f, int c, int b, int a, int fc, uint *pc)
     }
     if (u->killed) exit(-1);
     return;
-    
+
   case FMEM:          panic("FMEM from kernel");
   case FMEM   + USER: printf("FMEM + USER\n"); exit(-1);  // XXX psignal(SIGBUS)
   case FPRIV:         panic("FPRIV from kernel");
@@ -2114,22 +2114,22 @@ trap(uint *sp, double g, double f, int c, int b, int a, int fc, uint *pc)
     mappage(u->pdir, va & -PAGE, V2P+(memset(kalloc(), 0, PAGE)), PTE_P | PTE_W | PTE_U);
     return;
 
-  case FTIMER: 
-  case FTIMER + USER: 
+  case FTIMER:
+  case FTIMER + USER:
     ticks++;
     wakeup(&ticks);
 
     // force process exit if it has been killed and is in user space
     if (u->killed && (fc & USER)) exit(-1);
- 
+
     // force process to give up CPU on clock tick
-    if (u->state != RUNNING) { printf("pid=%d state=%d\n", u->pid, u->state); panic("!\n"); }        
+    if (u->state != RUNNING) { printf("pid=%d state=%d\n", u->pid, u->state); panic("!\n"); }
     u->state = RUNNABLE;
     sched();
 
     if (u->killed && (fc & USER)) exit(-1);
     return;
-    
+
   case FKEYBD:
   case FKEYBD + USER:
     consoleintr();
@@ -2173,11 +2173,11 @@ main()
   int *ksp;              // temp kernel stack pointer
   static char kstack[256]; // temp kernel stack
   static int endbss;     // last variable in bss segment
-    
+
   // initialize memory allocation
-  mem_top = kreserved = ((uint)&endbss + PAGE + 3) & -PAGE; 
+  mem_top = kreserved = ((uint)&endbss + PAGE + 3) & -PAGE;
   mem_sz = msiz();
-  
+
   // initialize kernel page table
   setupkvm();
   kpdir[0] = kpdir[(uint)USERTOP >> 22]; // need a 1:1 map of low physical memory for awhile

@@ -23,15 +23,15 @@ int cpu(uint pc, int argc, char **argv)
   double f, g;
 
   sp = ((uint)sbrk(STACKSZ) + STACKSZ - 28) & -8;
-  
+
   ((uint *)sp)[0] = sp + 24;
   ((uint *)sp)[2] = argc;
   ((uint *)sp)[4] = (uint) argv;
   ((uint *)sp)[6] = TRAP | (S_exit<<8); // call exit if main returns
 
-  for (;;) {   
+  for (;;) {
     if (sp & 7) { dprintf(2,"stack pointer not a multiple of 8! sp = %u\n", sp); return -1; }
-    cycle++;    
+    cycle++;
     ir = *(int *)pc;
     pc += 4;
     switch ((uchar)ir) {
@@ -90,7 +90,7 @@ int cpu(uint pc, int argc, char **argv)
     case POPG: g = *(double *)sp; sp += 8; continue;
 
     // load effective address
-    case LEA:  a = sp + (ir>>8); continue; 
+    case LEA:  a = sp + (ir>>8); continue;
     case LEAG: a = pc + (ir>>8); continue;
 
     // load a local
@@ -183,7 +183,7 @@ int cpu(uint pc, int argc, char **argv)
     case SXB:  *(uchar *)  (b + (ir>>8)) = a; continue;
     case SXD:  *(double *) (b + (ir>>8)) = f; continue;
     case SXF:  *(float *)  (b + (ir>>8)) = f; continue;
-      
+
     // arithmetic
     case ADDF: f += g; continue;
     case SUBF: f -= g; continue;
@@ -269,7 +269,7 @@ int cpu(uint pc, int argc, char **argv)
     case BGE:  if ((int)a >= (int)b) pc += ir>>8; continue;
     case BGEU: if (a >= b)           pc += ir>>8; continue;
     case BGEF: if (f >= g)           pc += ir>>8; continue;
-    
+
     // conversion
     case CID:  f = (int)a; continue;
     case CUD:  f = a; continue;
@@ -319,7 +319,7 @@ int cpu(uint pc, int argc, char **argv)
 //      case S_setsockopt:
 //      case S_getpeername:
 //      case S_getsockname:
-      
+
       default: dprintf(2,"unsupported trap cycle = %u pc = %08x ir = %08x a = %d b = %d c = %d", cycle, pc, ir, a, b, c); return -1;
       }
     default:   dprintf(2,"unknown instruction cycle = %u pc = %08x ir = %08x\n", cycle, pc, ir); return -1;
@@ -327,7 +327,7 @@ int cpu(uint pc, int argc, char **argv)
   }
 }
 
-usage()
+void usage(void)
 {
   dprintf(2,"%s : usage: %s [-v] file ...\n", cmd, cmd);
   exit(-1);
@@ -357,7 +357,7 @@ int main(int argc, char *argv[])
 
   read(f, &hdr, sizeof(hdr));
   if (hdr.magic != 0xC0DEF00D) { dprintf(2,"%s : bad hdr.magic\n", cmd); return -1; }
-  
+
   gs = (int)sbrk(st.st_size - sizeof(hdr) + hdr.bss);
   read(f, (void *)gs, st.st_size - sizeof(hdr));
   close(f);

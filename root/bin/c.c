@@ -79,9 +79,15 @@ typedef struct {
   int size;
 } array_t;
 
+typedef union node_u {
+  int i;
+  uint u;
+  union node_u *n;
+} *N;
+
 int tk,       // current token
-    ts, ip,   // text segment, current pointer
-    gs, data, // data segment, current offset
+    ip,       // text segment current offset
+    data,     // data segment current offset
     bss,      // bss offset
     loc,      // locals frame offset
     line,     // line number
@@ -90,10 +96,14 @@ int tk,       // current token
     verbose,  // print additional verbiage
     debug,    // print source and object code
     ffun,     // unresolved forward function counter
-    va, vp,   // variable pool, current pointer
-    *e,       // expression tree pointer
     *pdata,   // data segment patchup pointer
     *pbss;    // bss segment patchup pointer
+
+long ts,      // text segment
+    gs,       // data segment
+    va, vp;   // variable pool, current pointer
+
+N e;          // expression tree
 
 ident_t *id;  // current parsed identifier
 double fval;  // current token double value
@@ -108,7 +118,7 @@ char *file,   // input file name
 
 loc_t *ploc;  // local variable stack pointer
 
-char ops[] = 
+char ops[] =
   "HALT,ENT ,LEV ,JMP ,JMPI,JSR ,JSRA,LEA ,LEAG,CYC ,MCPY,MCMP,MCHR,MSET," // system
   "LL  ,LLS ,LLH ,LLC ,LLB ,LLD ,LLF ,LG  ,LGS ,LGH ,LGC ,LGB ,LGD ,LGF ," // load a
   "LX  ,LXS ,LXH ,LXC ,LXB ,LXD ,LXF ,LI  ,LHI ,LIF ,"
@@ -120,7 +130,7 @@ char ops[] =
   "ADD ,ADDI,ADDL,SUB ,SUBI,SUBL,MUL ,MULI,MULL,DIV ,DIVI,DIVL,"
   "DVU ,DVUI,DVUL,MOD ,MODI,MODL,MDU ,MDUI,MDUL,AND ,ANDI,ANDL,"
   "OR  ,ORI ,ORL ,XOR ,XORI,XORL,SHL ,SHLI,SHLL,SHR ,SHRI,SHRL,"
-  "SRU ,SRUI,SRUL,EQ  ,EQF ,NE  ,NEF ,LT  ,LTU ,LTF ,GE  ,GEU ,GEF ,"      // logical  
+  "SRU ,SRUI,SRUL,EQ  ,EQF ,NE  ,NEF ,LT  ,LTU ,LTF ,GE  ,GEU ,GEF ,"      // logical
   "BZ  ,BZF ,BNZ ,BNZF,BE  ,BEF ,BNE ,BNEF,BLT ,BLTU,BLTF,BGE ,BGEU,BGEF," // conditional
   "CID ,CUD ,CDI ,CDU ,"                                                   // conversion
   "CLI ,STI ,RTI ,BIN ,BOUT,NOP ,SSP ,PSHA,PSHI,PSHF,PSHB,POPB,POPF,POPA," // misc
@@ -129,7 +139,7 @@ char ops[] =
   "POW ,ATN2,FABS,ATAN,LOG ,LOGT,EXP ,FLOR,CEIL,HYPO,SIN ,COS ,TAN ,ASIN," // math
   "ACOS,SINH,COSH,TANH,SQRT,FMOD,"
   "IDLE,";
-  
+
 // types and type masks. specific bit patterns and orderings needed by expr()
 enum {
   CHAR   = 1, SHORT, INT, UCHAR, USHORT,
@@ -147,7 +157,7 @@ enum {
 // tokens and node types ( >= 128 so not to collide with ascii-valued tokens)
 enum {
   Num = 128, // low ordering of Num and Auto needed by nodc()
-  
+
   // keyword grouping needed by main()  XXX missing extern and register
   Asm, Auto, Break, Case, Char, Continue, Default, Do, Double, Else, Enum, Float, For, Goto, If, Int, Long, Return, Short,
   Sizeof, Static, Struct, Switch, Typedef, Union, Unsigned, Void, While, Va_list, Va_start, Va_arg,
@@ -164,7 +174,7 @@ enum {
   Assign,
   Adda, Suba, Mula, Diva, Moda, Anda, Ora, Xora, Shla, Shra,
   Cond,
-  Lor, Lan,  
+  Lor, Lan,
   Or,  Xor, And,
   Eq,  Ne,
   Lt,  Gt,  Le,  Ge,
@@ -178,7 +188,7 @@ void *new(int size)
 {
   void *p;
   if ((p = sbrk((size + 7) & -8)) == (void *)-1) { dprintf(2,"%s : fatal: unable to sbrk(%d)\n", cmd, size); exit(-1); }
-  return (void *)(((int)p + 7) & -8);
+  return (void *)(((long)p + 7) & -8);
 }
 
 void err(char *msg)
@@ -201,34 +211,35 @@ char *mapfile(char *name, int size) // XXX replace with mmap
 // instruction emitter
 void em(int i)
 {
-  if (debug) printf("%08x  %08x%6.4s\n", ip-ts, i, &ops[i*5]);
-  *(int *)ip = i;
+  if (debug) printf("%08x  %08x%6.4s\n", ip, i, &ops[i*5]);
+  *(int *)(ts+ip) = i;
   ip += 4;
 }
 void emi(int i, int c)
 {
-  if (debug) printf("%08x  %08x%6.4s  %d\n", ip-ts, i | (c << 8), &ops[i*5], c);
-  if (c<<8>>8 != c) err("emi() constant out of bounds"); 
-  *(int *)ip = i | (c << 8);
+  if (debug) printf("%08x  %08x%6.4s  %d\n", ip, i | (c << 8), &ops[i*5], c);
+  if (c<<8>>8 != c) err("emi() constant out of bounds");
+  *(int *)(ts+ip) = i | (c << 8);
   ip += 4;
 }
-void emj(int i, int c) { emi(i, c - ip - 4); } // jump
+void emj(int i, int c) { emi(i, c - (ts+ip) - 4); } // jump
 void eml(int i, int c) { emi(i, c - loc); } // local
 void emg(int i, int c) { if (c < BSS_TAG) *pdata++ = ip; else { *pbss++ = ip; c -= BSS_TAG; } emi(i, c); } // global
 int emf(int i, int c) // forward
 {
-  if (debug) printf("%08x  %08x%6.4s  <fwd>\n", ip-ts, i | (c << 8), &ops[i*5]);
+  if (debug) printf("%08x  %08x%6.4s  <fwd>\n", ip, i | (c << 8), &ops[i*5]);
   if (c<<8>>8 != c) err("emf() offset out of bounds");
-  *(int *)ip = i | (c << 8);
+  *(int *)(ts+ip) = i | (c << 8);
   ip += 4;
-  return ip - 4 - ts;
+  return ip - 4;
 }
 void patch(int t, int a)
 {
-  int n;
+  int n; long tt;
   while (t) {
-    n = *(int *)(t += ts);
-    *(int *)t = (n & 0xff) | ((a - t - 4) << 8);
+    tt = ts + t;
+    n = *(int *)tt;
+    *(int *)tt = (n & 0xff) | (((ts+a) - tt - 4) << 8);
     t = n >> 8;
   }
 }
@@ -248,7 +259,7 @@ void next(void)
   static char iname[512], *ifile, *ipos; // XXX 512
   static int iline;
   static ident_t *ht[HASH_SZ];
-  
+
   for (;;) {
     switch (tk = *pos++) {
     case ' ': case '\t': case '\v': case '\r': case '\f':
@@ -271,7 +282,7 @@ void next(void)
           memcpy(iname, incl, b = strlen(incl)); iname[b++] = '/';
         } else {
           for (b = strlen(file); b; b--) if (file[b-1] == '/') { memcpy(iname, file, b); break; }
-        } 
+        }
         while (*pos && *pos != '>' && *pos != '"' && b < sizeof(iname)-1) iname[b++] = *pos++;
         iname[b] = 0;
         if (stat(iname, &st)) {
@@ -332,7 +343,7 @@ frac:     b = 10;
           if (*pos == 'e' || *pos == 'E') {
             if ((b = (*++pos == '-')) || *pos == '+') pos++;
             ex = 0; while (*pos >= '0' && *pos <= '9') ex = ex * 10 + (*pos++ - '0');
-            while (ex--) fval *= b ? .1 : 10.; 
+            while (ex--) fval *= b ? .1 : 10.;
           }
           if (*pos == 'f') pos++; // XXX should floats be treated different?
           ty = DOUBLE;
@@ -404,7 +415,7 @@ frac:     b = 10;
             }
 // XXX			b = (char) b; // make sure 0xFF becomes -1 XXX do some other way!
             break;
-          case '0' ... '7': 
+          case '0' ... '7':
             b -= '0';
             if (*pos >= '0' && *pos <= '7') {
               b = b*8 + *pos++ - '0';
@@ -427,10 +438,10 @@ frac:     b = 10;
 
     case '=': if (*pos == '=') { pos++; tk = Eq;   } else tk = Assign; return;
     case '+': if (*pos == '+') { pos++; tk = Inc;  } else if (*pos == '=') { pos++; tk = Adda; } else tk = Add; return;
-    case '-': if (*pos == '-') { pos++; tk = Dec;  } 
+    case '-': if (*pos == '-') { pos++; tk = Dec;  }
          else if (*pos == '>') { pos++; tk = Arrow; } else if (*pos == '=') { pos++; tk = Suba; } else tk = Sub; return;
     case '*': if (*pos == '=') { pos++; tk = Mula; } else tk = Mul; return;
-    case '<': if (*pos == '=') { pos++; tk = Le;   } 
+    case '<': if (*pos == '=') { pos++; tk = Le;   }
          else if (*pos == '<') { if (*++pos == '=') { pos++; tk = Shla; } else tk = Shl; } else tk = Lt; return;
     case '>': if (*pos == '=') { pos++; tk = Ge;   }
          else if (*pos == '>') { if (*++pos == '=') { pos++; tk = Shra; } else tk = Shr; } else tk = Gt; return;
@@ -477,17 +488,17 @@ void skip(int c)
 
 void expr(int lev);
 void member(int stype, struct_t *s);
-void rv(int *a);
+void rv(N a);
 void stmt(void);
-void node(int n, int *a, int *b);
+void node(int n, N a, N b);
 void cast(uint t);
 
 int imm(void) /// XXX move these back down once I validate prototypes working for double immf()
 {
-  int *b = e, c;
+  N b = e; int c;
   expr(Cond);
-  if (*e == Num) c = e[2];
-  else if (*e == Numf) c = (int) *(double *)(e+2);
+  if (e->i == Num) c = e[2].i;
+  else if (e->i == Numf) c = (int) *(double *)(e+2);
   else { err("bad constant expression"); c = 0; }
   e = b;
   return c;
@@ -495,10 +506,10 @@ int imm(void) /// XXX move these back down once I validate prototypes working fo
 
 double immf(void)
 {
-  int *b = e; double c;
+  N b = e; double c;
   expr(Cond);
-  if (*e == Num) c = e[2];
-  else if (*e == Numf) c = *(double *)(e+2);
+  if (e->i == Num) c = e[2].i;
+  else if (e->i == Numf) c = *(double *)(e+2);
   else { err("bad float constant expression"); c = 0; }
   e = b;
   return c;
@@ -508,7 +519,7 @@ int tsize(uint t) // XXX return unsigned? or error checking on size
 {
   array_t *a; struct_t *s;
   switch (t & TMASK) {
-  case ARRAY:  a = (array_t *)(va+(t>>TSHIFT)); return a->size * tsize(a->type);  
+  case ARRAY:  a = (array_t *)(va+(t>>TSHIFT)); return a->size * tsize(a->type);
   case STRUCT:
     if ((s = (struct_t *)(va+(t>>TSHIFT)))->align) return s->size;
     err("can't compute size of incomplete struct");
@@ -560,7 +571,7 @@ uint basetype(void)
     next();
     if (tk == Char) { next(); return UCHAR; }
     if (tk == Short) { next(); if (tk == Int) next(); return USHORT; }
-    if (tk == Long) next(); 
+    if (tk == Long) next();
     if (tk == Int) next();
     return UINT;
 
@@ -582,17 +593,17 @@ uint basetype(void)
       s->next = structs; structs = s;
 found:
       next();
-      if (tk != '{') return STRUCT | (((int)s-va)<<TSHIFT);
+      if (tk != '{') return STRUCT | (((long)s-va)<<TSHIFT);
       if (s->align) err("struct or union redefinition");
       next();
     } else {
       skip('{');
-      s = (struct_t *) vp; vp += sizeof(struct_t);   
+      s = (struct_t *) vp; vp += sizeof(struct_t);
       s->next = structs; structs = s;
     }
     member(m,s);
     skip('}');
-    return STRUCT | (((int)s-va)<<TSHIFT);
+    return STRUCT | (((long)s-va)<<TSHIFT);
 
   case Enum:
     next();
@@ -668,7 +679,7 @@ uint *type(uint *t, ident_t **v, uint bt)
       }
       if (n) {
         if (n->class && n->local) err("duplicate definition");
-        if (*v == n) *v = (ident_t *) ploc; // hack if function name same as parameter 
+        if (*v == n) *v = (ident_t *) ploc; // hack if function name same as parameter
         ploc->class = n->class; // XXX make sure these are unwound for abstract types and forward decls
         ploc->type = n->type;
         ploc->val = n->val;
@@ -714,8 +725,8 @@ uint *type(uint *t, ident_t **v, uint bt)
 
 void decl(int bc)
 {
-  int sc, size, align, hglo, *b, *c = 0; uint bt, t; ident_t *v; loc_t *sp;
-  
+  int sc, size, align, hglo; uint bt, t; ident_t *v; loc_t *sp; N b, c=0;
+
   for (;;) {
     if (tk == Static || tk == Typedef || (tk == Auto && bc == Auto))
       { sc = tk; next(); if (!(bt = basetype())) bt = INT; } // XXX typedef inside function?  probably bad!
@@ -731,15 +742,15 @@ void decl(int bc)
         if (bc != Static || sc != Static) err("bad nested function");
         if ((t & TMASK) != FUN) err("bad function definition");
         rt = *(uint *)(va+(t>>TSHIFT));
-        if (v->class == FFun) { 
+        if (v->class == FFun) {
           patch(v->val,ip); ffun--;
-          if (rt != *(uint *)(va+(v->type>>TSHIFT)) || ((bt  = *(uint *)(va+(v->type>>TSHIFT)+4)) && 
+          if (rt != *(uint *)(va+(v->type>>TSHIFT)) || ((bt  = *(uint *)(va+(v->type>>TSHIFT)+4)) &&
             bt != *(uint *)(va+(t>>TSHIFT)+4))) err("conflicting forward function declaration");
         }
         else if (v->class) err("duplicate function definition");
         v->class = Fun;
         v->type = t;
-        v->val = ip;
+        v->val = ts+ip;
         loc = 0;
         next();
         b = e;
@@ -758,7 +769,7 @@ void decl(int bc)
           if (v->class == FLabel) err("unresoved label");
           v->class = ploc->class;
           v->local = 0;
-        }        
+        }
         break;
       } else if ((t & TMASK) == FUN) {
 //        if (bc != Static || sc != Static) err("bad nested function declaration");
@@ -773,7 +784,7 @@ void decl(int bc)
           v->type = ploc->type;
           v->class = ploc->class;
           v->local = 0;
-        }        
+        }
       } else {
         if (bc == Auto) {
           if (v->class && v->local) err("duplicate definition");
@@ -785,22 +796,22 @@ void decl(int bc)
           v->local = 1;
         }
         else if (v->class) err("duplicate definition");
-             
+
         v->class = sc;
         v->type = t;
         if (sc != Typedef) { // XXX typedefs local to functions?
           if ((t & TMASK) == ARRAY) v->class = (sc == Auto) ? Lea : Leag; // not lvalue if array
           size = tsize(t);
           align = talign(t);
-          if (sc == Auto) {            
+          if (sc == Auto) {
             v->val = loc = (loc - size) & -align; // allocate stack space
             if (tk == Assign) {
-              node(Auto,(int *)t,(int *)v->val); b = e;
+              (e-=4)->i = Auto; e[1].i = t; e[2].i = v->val; b = e;
               next();
               expr(Cond);
               cast(t < UINT ? INT : t);
-              { *(e-=2) = Assign; e[1] = (int)b; }
-              if (c) { *(e-=2) = Comma; e[1] = (int)c; }
+              { (e-=2)->i = Assign; e[1].n = b; }
+              if (c) { (e-=2)->i = Comma; e[1].n = c; }
               c = e;
             }
           } else {
@@ -826,7 +837,7 @@ void decl(int bc)
                   default:     *(int *)   (gs + data) = imm();  data += 4; break;
                   }
                   if (tk == Comma) next();
-                } 
+                }
                 next();
                 if (size) data = hglo + size * align; // XXX need to zero fill if size > initialized part  XXX but may default since using sbrk vs malloc?
                 // XXX else set array size if []
@@ -891,51 +902,51 @@ void member(int stype, struct_t *s)
     }
   }
   s->align = salign;
-  s->size = (ssize + salign - 1) & -salign;  
+  s->size = (ssize + salign - 1) & -salign;
 }
 
 // expression parsing
-void node(int n, int *a, int *b) { *(e-=4) = n; e[1] = (int)a; e[2] = (int)b; }
-void nodc(int n, int *a, int *b) // commutative
+void node(int n, N a, N b) { (e-=4)->i = n; e[1].n = a; e[2].n = b; }
+void nodc(int n, N a, N b) // commutative
 {
-  *(e-=4) = n;
-  if (*a < *b) { e[1] = (int)b; e[2] = (int)a; } else { e[1] = (int)a; e[2] = (int)b; } // put simpler expression in rhs
+  (e-=4)->i = n;
+  if (a->i < b->i) { e[1].n = b; e[2].n = a; } else { e[1].n = a; e[2].n = b; } // put simpler expression in rhs
 }
 
-void mul(int *b) // XXX does this handle unsigned correctly?
+void mul(N b) // XXX does this handle unsigned correctly?
 {
-  if (*b == Num) {
-    if (*e == Num) { e[2] *= b[2]; return; }
-    if (b[2] == 1) return;
+  if (b->i == Num) {
+    if (e->i == Num) { e[2].i *= b[2].i; return; }
+    if (b[2].i == 1) return;
   }
-  if (*e == Num && e[2] == 1) { e = b; return; } // XXX reliable???
+  if (e->i == Num && e[2].i == 1) { e = b; return; } // XXX reliable???
   nodc(Mul,e,b);
 }
 
-void add(uint *b)  // XXX make sure to optimize (a + 9 + 2) -> (a + 11)    and    (a + 9 - 2) -> (a + 7)
+void add(N b)  // XXX make sure to optimize (a + 9 + 2) -> (a + 11)    and    (a + 9 - 2) -> (a + 7)
 {
-  if (*b == Num) {
-    if (*e == Num || *e == Lea || *e == Leag) { e[2] += b[2]; return; } // XXX  <<>> check
-    if (!b[2]) return;
+  if (b->i == Num) {
+    if (e->i == Num || e->i == Lea || e->i == Leag) { e[2].u += b[2].u; return; } // XXX  <<>> check
+    if (!b[2].i) return;
   }
-  if (*e == Num) {
-    if (*b == Lea) { e[2] += b[2]; *e = Lea; return; } // XXX structure offset optimizations
-    if (*b == Leag) { e[2] += b[2]; *e = Leag; return; }
-    if (!e[2]) { e = b; return; } // XXX reliable???
+  if (e->i == Num) {
+    if (b->i == Lea) { e[2].u += b[2].u; e->i = Lea; return; } // XXX structure offset optimizations
+    if (b->i == Leag) { e[2].u += b[2].u; e->i = Leag; return; }
+    if (!e[2].i) { e = b; return; } // XXX reliable???
   }
   nodc(Add,b,e);
 }
 
-int *flot(int *b, uint t)
+N flot(N b, uint t)
 {
   if (t == DOUBLE || t == FLOAT) return b;
-  if (*b == Num) {
-    *b = Numf;
-    *(double *)(b + 2) = t < UINT ? (double)b[2] : (double)(uint)b[2];
+  if (b->i == Num) {
+    b->i = Numf;
+    *(double *)(b+2) = t < UINT ? (double)b[2].i : (double)b[2].u;
     return b;
   }
-  *(e-=2) = t < UINT ? Cid : Cud;
-  e[1] = (int)b;
+  (e-=2)->i = t < UINT ? Cid : Cud;
+  e[1].n = b;
   return e;
 }
 
@@ -948,83 +959,83 @@ void ind(void)
     if ((ty & TMASK) == ARRAY) return; // was a ref, still a ref
   } else
     err("dereferencing a non-pointer");
-  
+
   if ((ty & TMASK) == FUN) return; // XXX
-  switch (*e) {
-  case Leag: *e = Static; e[1] = ty; return;
-  case Lea:  *e = Auto; e[1] = ty; return;
-  default: *(e-=2) = Ptr; e[1] = ty; return;
+  switch (e->i) {
+  case Leag: e->i = Static; e[1].i = ty; return;
+  case Lea:  e->i = Auto; e[1].i = ty; return;
+  default: (e-=2)->i = Ptr; e[1].i = ty; return;
   }
 }
 
 void addr(void)
 {
   ty += PTR;
-  switch (*e) {
+  switch (e->i) {
   case Fun: return; // XXX dont think ty is going to be right?
   case Leag: case Lea: return; // XXX
-  case Static: *e = Leag; return;
-  case Auto: *e = Lea; return;
+  case Static: e->i = Leag; return;
+  case Auto: e->i = Lea; return;
   case Ptr: e += 2; return;
   default: err("lvalue expected");
   }
 }
 
-void assign(int n, int *b)
+void assign(int n, N b)
 {
-  *(e-=2) = n; e[1] = (int)b; 
+  (e-=2)->i = n; e[1].n = b;
   switch (ty) { // post-cast usually removed by trim()
-  case CHAR:   *(e-=2) = Cic; return;
-  case UCHAR:  *(e-=2) = Cuc; return;
-  case SHORT:  *(e-=2) = Cis; return;
-  case USHORT: *(e-=2) = Cus; return;
+  case CHAR:   (e-=2)->i = Cic; return;
+  case UCHAR:  (e-=2)->i = Cuc; return;
+  case SHORT:  (e-=2)->i = Cis; return;
+  case USHORT: (e-=2)->i = Cus; return;
   }
 }
 
 void trim(void) // trim dead code from expression statements (just the common cases)
 {
-  if (*e >= Cic && *e <= Cus) e += 2; // remove conversion after assignment
-  if (*e == Add && *(int *)e[2] == Num) e = (int *)e[1]; // convert x++ into ++x
+  if (e->i >= Cic && e->i <= Cus) e += 2; // remove conversion after assignment
+  if (e->i == Add && e[2].n->i == Num) e = e[1].n; // convert x++ into ++x
 }
 
 void cast(uint t)
 {
   if (t == DOUBLE || t == FLOAT) {
-    if (ty < UINT)                        
-      { if (*e == Num) { *e = Numf; *(double *)(e+2) = e[2]; } else { *(e-=2) = Cid; e[1] = (int)(e+2); } }
+    if (ty < UINT)
+      { if (e->i == Num) { e->i = Numf; *(double *)(e+2) = e[2].i; } else { (e-=2)->i = Cid; e[1].n = e+2; } }
     else if (ty != DOUBLE && ty != FLOAT)
-      { if (*e == Num) { *e = Numf; *(double *)(e+2) = (uint)e[2]; } else { *(e-=2) = Cud; e[1] = (int)(e+2); } }
+      { if (e->i == Num) { e->i = Numf; *(double *)(e+2) = e[2].u; } else { (e-=2)->i = Cud; e[1].n = e+2; } }
   } else if (t < UINT) {
-    if (ty == DOUBLE || ty == FLOAT) if (*e == Numf) { *e = Num; e[2] = (int)*(double *)(e+2); } else *(e-=2) = Cdi;
+    if (ty == DOUBLE || ty == FLOAT) if (e->i == Numf) { e->i = Num; e[2].i = (int)*(double *)(e+2); } else (e-=2)->i = Cdi;
     switch (t) {
-    case CHAR:   if (*e == Num) e[2] = (char)   e[2]; else *(e-=2) = Cic; break;
-    case UCHAR:  if (*e == Num) e[2] = (uchar)  e[2]; else *(e-=2) = Cuc; break;
-    case SHORT:  if (*e == Num) e[2] = (short)  e[2]; else *(e-=2) = Cis; break;
-    case USHORT: if (*e == Num) e[2] = (ushort) e[2]; else *(e-=2) = Cus; break;
+    case CHAR:   if (e->i == Num) e[2].i = (char)   e[2].i; else (e-=2)->i = Cic; break;
+    case UCHAR:  if (e->i == Num) e[2].i = (uchar)  e[2].i; else (e-=2)->i = Cuc; break;
+    case SHORT:  if (e->i == Num) e[2].i = (short)  e[2].i; else (e-=2)->i = Cis; break;
+    case USHORT: if (e->i == Num) e[2].i = (ushort) e[2].i; else (e-=2)->i = Cus; break;
     }
   } else if (ty == DOUBLE || ty == FLOAT) {
-    if (*e == Numf) { *e = Num; e[2] = (uint)*(double *)(e+2); } else *(e-=2) = Cdu;
+    if (e->i == Numf) { e->i = Num; e[2].u = (uint)*(double *)(e+2); } else (e-=2)->i = Cdu;
   }
 }
 
 void expr(int lev)
 {
-  int *b, *d, *dd; uint t, tt; member_t *m;
+  N b, d, dd; uint t, tt; member_t *m;
 
   switch (tk) {
   case Num:
-    *(e-=4) = Num; e[2] = ival;
+    (e-=4)->i = Num; e[2].i = ival;
     next();
     break;
 
   case Numf:
-    *(e-=4) = Numf; *(double*)(e+2) = fval;
+    (e-=4)->i = Numf; *(double*)(e+2) = fval;
     next();
     break;
 
   case '"':
     ty = PTR | CHAR;
-    *(e-=4) = Leag; e[2] = ival;
+    (e-=4)->i = Leag; e[2].i = ival;
     next();
     while (tk == '"') next();
     data++;
@@ -1032,7 +1043,7 @@ void expr(int lev)
 
   case Id:
     if (id->class) {
-      node(id->class, (int *)(ty = id->type), (id->class == FFun) ? (int *)id : (int *)id->val);
+      (e-=4)->i = id->class; e[1].i = ty = id->type; if (id->class == FFun) e[2].n = (N)id; else e[2].i = id->val;
       next();
       break;
     }
@@ -1040,7 +1051,7 @@ void expr(int lev)
     ffun++;
     ty = id->type = FUN | ((vp-va)<<TSHIFT);
     *(uint *)vp = INT; vp += 8;
-    node(FFun,0,(int *)id);
+    node(FFun,0,(N)id);
     next();
     if (tk != Paren) err("undefined symbol");
     else if (verbose) dprintf(2,"%s : [%s:%d] warning: undeclared function called here\n", cmd, file, line);
@@ -1051,7 +1062,7 @@ void expr(int lev)
     skip(Paren);
     expr(Assign);
     skip(Comma);
-    b = e; *(e-=4) = Num; e[2] = 8; *(e-=2) = Adda; e[1] = (int)b;
+    b = e; (e-=4)->i = Num; e[2].i = 8; (e-=2)->i = Adda; e[1].n = b;
     if (!(tt = basetype())) { err("bad va_arg"); tt = INT; }
     t = 0;
     type(&t, 0, tt);
@@ -1078,29 +1089,29 @@ void expr(int lev)
   // pre operations
   case Mul:
     next(); expr(Inc); ind();
-    break;         
+    break;
 
   case And:
     next(); expr(Inc); addr();
     break;
 
   case '!':
-    next(); expr(Inc); 
-    switch (*e) {
-    case Eq: *e = Ne; break;
-    case Ne: *e = Eq; break;
-    case Lt: *e = Ge; break;
-    case Ge: *e = Lt; break;
-    case Ltu: *e = Geu; break;
-    case Geu: *e = Ltu; break;
-    case Eqf: *e = Nef; break;
-    case Nef: *e = Eqf; break;
-    case Ltf: *e = Gef; break;
-    case Gef: *e = Ltf; break;
+    next(); expr(Inc);
+    switch (e->i) {
+    case Eq: e->i = Ne; break;
+    case Ne: e->i = Eq; break;
+    case Lt: e->i = Ge; break;
+    case Ge: e->i = Lt; break;
+    case Ltu: e->i = Geu; break;
+    case Geu: e->i = Ltu; break;
+    case Eqf: e->i = Nef; break;
+    case Nef: e->i = Eqf; break;
+    case Ltf: e->i = Gef; break;
+    case Gef: e->i = Ltf; break;
     default:
-      if (ty < FLOAT || (ty & PMASK)) *(e-=2) = Not;
+      if (ty < FLOAT || (ty & PMASK)) (e-=2)->i = Not;
       else if (ty >= STRUCT) err("bad operand to !");
-      else *(e-=2) = Notf;
+      else (e-=2)->i = Notf;
       ty = INT;
     }
     break;
@@ -1108,7 +1119,7 @@ void expr(int lev)
   case '~':
     next(); expr(Inc);
     if (ty >= FLOAT) err("bad operand to ~");
-    else { if (*e == Num) e[2] = ~e[2]; else { *(e-=4) = Num; e[2] = -1; nodc(Xor,e+4,e); } ty = ty < UINT ? INT : UINT; }
+    else { if (e->i == Num) e[2].i = ~e[2].i; else { (e-=4)->i = Num; e[2].i = -1; nodc(Xor,e+4,e); } ty = ty < UINT ? INT : UINT; }
     break;
 
   case Add:
@@ -1117,23 +1128,23 @@ void expr(int lev)
     break;
 
   case Sub:
-    next(); expr(Inc); 
+    next(); expr(Inc);
     if (ty >= STRUCT) err("bad operand to -");
     else if (ty & FLOAT)
-      { if (*e == Numf) *(double *)(e+2) *= -1.; else { *(e-=4) = Numf; *(double *)(e+2) = -1; nodc(Mulf,e+4,e); } ty = DOUBLE; }
-    else { if (*e == Num) e[2] *= -1; else { *(e-=4) = Num; e[2] = -1; nodc(Mul,e+4,e); } ty = ty < UINT ? INT : UINT; }
+      { if (e->i == Numf) *(double *)(e+2) *= -1.; else { (e-=4)->i = Numf; *(double *)(e+2) = -1; nodc(Mulf,e+4,e); } ty = DOUBLE; }
+    else { if (e->i == Num) e[2].i *= -1; else { (e-=4)->i = Num; e[2].i = -1; nodc(Mul,e+4,e); } ty = ty < UINT ? INT : UINT; }
     break;
 
   case Inc:
     next(); expr(Inc);
     if (!(ty & PMASK) && ty >= FLOAT) err("bad operand to ++");
-    else { *(e-=4) = Num; e[2] = tinc(ty); assign(Adda,e+4); }
+    else { (e-=4)->i = Num; e[2].i = tinc(ty); assign(Adda,e+4); }
     break;
 
   case Dec:
     next(); expr(Inc);
     if (!(ty & PMASK) && ty >= FLOAT) err("bad operand to --");
-    else { *(e-=4) = Num; e[2] = tinc(ty); assign(Suba,e+4); }
+    else { (e-=4)->i = Num; e[2].i = tinc(ty); assign(Suba,e+4); }
     break;
 
   case Sizeof:
@@ -1141,7 +1152,7 @@ void expr(int lev)
     if (t = tk == Paren) next();
     if (t && (tt = basetype())) { ty = 0; type(&ty, 0, tt); }
     else { b = e; expr(Dot); e = b; } // XXX backout any data seg allocs
-    *(e-=4) = Num; e[2] = tsize(ty);
+    (e-=4)->i = Num; e[2].i = tsize(ty);
     ty = INT;
     if (t) skip(')');
     break;
@@ -1152,12 +1163,12 @@ void expr(int lev)
   while (tk >= lev) {
     b = e; t = ty;
     switch (tk) {
-    case Comma: trim(); b = e; next(); expr(Assign); *(e-=2) = Comma; e[1] = (int)b; continue;
+    case Comma: trim(); b = e; next(); expr(Assign); (e-=2)->i = Comma; e[1].n = b; continue;
     case Assign: next(); expr(Assign); cast(t < UINT ? INT : t); ty = t; assign(Assign,b); continue;
 
     case Adda:
       next(); expr(Assign);
-      if ((t & PAMASK) && ty <= UINT) { if ((tt = tinc(t)) > 1) { *(e-=4) = Num; e[2] = tt; mul(e+4); } ty = t; assign(Adda,b); }
+      if ((t & PAMASK) && ty <= UINT) { if ((tt = tinc(t)) > 1) { (e-=4)->i = Num; e[2].i = tt; mul(e+4); } ty = t; assign(Adda,b); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to +=");
       else if (tt & FLOAT) { e = flot(e,ty); ty = t; assign(Addaf,b); }
       else { ty = t; assign(Adda,b); }
@@ -1165,7 +1176,7 @@ void expr(int lev)
 
     case Suba:
       next(); expr(Assign);
-      if ((t & PAMASK) && ty <= UINT) { if ((tt = tinc(t)) > 1) { *(e-=4) = Num; e[2] = tt; mul(e+4); } ty = t; assign(Suba,b); }
+      if ((t & PAMASK) && ty <= UINT) { if ((tt = tinc(t)) > 1) { (e-=4)->i = Num; e[2].i = tt; mul(e+4); } ty = t; assign(Suba,b); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to -=");
       else if (tt & FLOAT) { e = flot(e,ty); ty = t; assign(Subaf,b); }
       else { ty = t; assign(Suba,b); }
@@ -1189,7 +1200,7 @@ void expr(int lev)
       next(); expr(Assign);
       if ((tt=t|ty) >= FLOAT) err("bad operands to %="); else { ty = t; assign((tt & UINT) ? Mdua : Moda, b); }
       continue;
-      
+
     case Anda:
       next(); expr(Assign);
       if ((t|ty) >= FLOAT) err("bad operands to &="); else { ty = t; assign(Anda,b); }
@@ -1216,145 +1227,145 @@ void expr(int lev)
       continue;
 
     case Cond:
-      if (ty == DOUBLE || ty == FLOAT) *(b = e -= 2) = Nzf;
+      if (ty == DOUBLE || ty == FLOAT) (b = e -= 2)->i = Nzf;
       next(); expr(Comma);
       d = e; t = ty; skip(':'); expr(Cond); dd = e;
       if (!((ty & PAMASK) && ((t & PAMASK) || t <= UINT))) {
         if ((t & PAMASK) && ty <= UINT) ty = t;
         else if ((tt=t|ty) >= STRUCT) err("bad conditional expression types");
-        else if (tt & FLOAT) { dd = flot(dd,ty); d = flot(d,t); ty = DOUBLE; } 
+        else if (tt & FLOAT) { dd = flot(dd,ty); d = flot(d,t); ty = DOUBLE; }
         else { ty = (tt & UINT) ? UINT : INT; }
       }
-      node(Cond,b,d); e[3] = (int)dd;
+      node(Cond,b,d); e[3].n = dd;
       continue;
-    
+
     case Lor:
-      if (ty == DOUBLE || ty == FLOAT) *(b = e-=2) = Nzf;
+      if (ty == DOUBLE || ty == FLOAT) (b = e-=2)->i = Nzf;
       next(); expr(Lan);
-      if (ty == DOUBLE || ty == FLOAT) *(e-=2) = Nzf;
-      *(e-=2) = Lor; e[1] = (int)b; ty = INT;
+      if (ty == DOUBLE || ty == FLOAT) (e-=2)->i = Nzf;
+      (e-=2)->i = Lor; e[1].n = b; ty = INT;
       continue;
 
     case Lan:
-      if (ty == DOUBLE || ty == FLOAT) *(b = e-=2) = Nzf;
+      if (ty == DOUBLE || ty == FLOAT) (b = e-=2)->i = Nzf;
       next(); expr(Or);
-      if (ty == DOUBLE || ty == FLOAT) *(e-=2) = Nzf;
-      *(e-=2) = Lan; e[1] = (int)b; ty = INT;
+      if (ty == DOUBLE || ty == FLOAT) (e-=2)->i = Nzf;
+      (e-=2)->i = Lan; e[1].n = b; ty = INT;
       continue;
 
     case Or:
       next(); expr(Xor);
       if ((tt=t|ty) >= FLOAT) err("bad operands to |");
-      else { if (*b == Num && *e == Num) e[2] |= b[2]; else nodc(Or,b,e);  ty = (tt & UINT) ? UINT : INT; }
+      else { if (b->i == Num && e->i == Num) e[2].i |= b[2].i; else nodc(Or,b,e);  ty = (tt & UINT) ? UINT : INT; }
       continue;
 
     case Xor:
       next(); expr(And);
       if ((tt=t|ty) >= FLOAT) err("bad operands to ^");
-      else { if (*b == Num && *e == Num) e[2] ^= b[2]; else nodc(Xor,b,e); ty = (tt & UINT) ? UINT : INT; }
+      else { if (b->i == Num && e->i == Num) e[2].i ^= b[2].i; else nodc(Xor,b,e); ty = (tt & UINT) ? UINT : INT; }
       continue;
 
     case And:
       next(); expr(Eq);
       if ((tt=t|ty) >= FLOAT) err("bad operands to &");
-      else { if (*b == Num && *e == Num) e[2] &= b[2]; else nodc(And,b,e); ty = (tt & UINT) ? UINT : INT; }
+      else { if (b->i == Num && e->i == Num) e[2].i &= b[2].i; else nodc(And,b,e); ty = (tt & UINT) ? UINT : INT; }
       continue;
 
     case Eq:
       next(); expr(Lt);
       if ((t < FLOAT || (t & PAMASK)) && (ty < FLOAT || (ty & PAMASK)))
-        { if (*b == Num && *e == Num) e[2] = b[2] == e[2]; else nodc(Eq,b,e); }
+        { if (b->i == Num && e->i == Num) e[2].i = b[2].i == e[2].i; else nodc(Eq,b,e); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to ==");
       else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) { *e = Num; e[2] = *(double *)(b+2) == *(double *)(d+2); } else nodc(Eqf,b,d);
-      } else { if (*b == Num && *e == Num) e[2] = b[2] == e[2]; else nodc(Eq,b,e); }
+        if (b->i == Numf && d->i == Numf) { e->i = Num; e[2].i = *(double *)(b+2) == *(double *)(d+2); } else nodc(Eqf,b,d);
+      } else { if (b->i == Num && e->i == Num) e[2].i = b[2].i == e[2].i; else nodc(Eq,b,e); }
       ty = INT;
       continue;
 
     case Ne:
-      next(); expr(Lt);  
+      next(); expr(Lt);
       if ((t < FLOAT || (t & PAMASK)) && (ty < FLOAT || (ty & PAMASK)))
-        { if (*b == Num && *e == Num) e[2] = b[2] != e[2]; else nodc(Ne,b,e); }
+        { if (b->i == Num && e->i == Num) e[2].i = b[2].i != e[2].i; else nodc(Ne,b,e); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to !=");
       else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) { *e = Num; e[2] = *(double *)(b+2) != *(double *)(d+2); } else nodc(Nef,b,d);
-      } else { if (*b == Num && *e == Num) e[2] = b[2] != e[2]; else nodc(Ne,b,e); }
+        if (b->i == Numf && d->i == Numf) { e->i = Num; e[2].i = *(double *)(b+2) != *(double *)(d+2); } else nodc(Nef,b,d);
+      } else { if (b->i == Num && e->i == Num) e[2].i = b[2].i != e[2].i; else nodc(Ne,b,e); }
       ty = INT;
       continue;
 
     case Lt:
-      next(); expr(Shl); 
-      if ((t & PAMASK) && (ty & PAMASK)) { if (*b == Num && *e == Num) e[2] = (uint) b[2] < e[2]; else node(Ltu,b,e); }
+      next(); expr(Shl);
+      if ((t & PAMASK) && (ty & PAMASK)) { if (b->i == Num && e->i == Num) e[2].i = b[2].u < e[2].u; else node(Ltu,b,e); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to <");
       else if (tt & FLOAT) {
-        d = flot(e,ty); b = flot(b,t); 
-        if (*b == Numf && *d == Numf) { *e = Num; e[2] = *(double *)(b+2) < *(double *)(d+2); } else node(Ltf,b,d);
-      } else if (tt & UINT) { if (*b == Num && *e == Num) e[2] = (uint) b[2] < e[2]; else node(Ltu,b,e); }
-      else { if (*b == Num && *e == Num) e[2] = b[2] < e[2]; else node(Lt,b,e); }
-      ty = INT;      
+        d = flot(e,ty); b = flot(b,t);
+        if (b->i == Numf && d->i == Numf) { e->i = Num; e[2].i = *(double *)(b+2) < *(double *)(d+2); } else node(Ltf,b,d);
+      } else if (tt & UINT) { if (b->i == Num && e->i == Num) e[2].i = b[2].u < e[2].u; else node(Ltu,b,e); }
+      else { if (b->i == Num && e->i == Num) e[2].i = b[2].i < e[2].i; else node(Lt,b,e); }
+      ty = INT;
       continue;
 
     case Gt:
-      next(); expr(Shl); 
-      if ((t & PAMASK) && (ty & PAMASK)) { if (*b == Num && *e == Num) e[2] = (uint) b[2] > e[2]; else node(Ltu,e,b); }
+      next(); expr(Shl);
+      if ((t & PAMASK) && (ty & PAMASK)) { if (b->i == Num && e->i == Num) e[2].i = b[2].u > e[2].u; else node(Ltu,e,b); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to >");
-      else if (tt & FLOAT) { 
+      else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) { *e = Num; e[2] = *(double *)(b+2) > *(double *)(d+2); } else node(Ltf,d,b);
-      } else if (tt & UINT) { if (*b == Num && *e == Num) e[2] = (uint) b[2] > e[2]; else node(Ltu,e,b); }
-      else { if (*b == Num && *e == Num) e[2] = b[2] > e[2]; else node(Lt,e,b); }
+        if (b->i == Numf && d->i == Numf) { e->i = Num; e[2].i = *(double *)(b+2) > *(double *)(d+2); } else node(Ltf,d,b);
+      } else if (tt & UINT) { if (b->i == Num && e->i == Num) e[2].i = b[2].u > e[2].u; else node(Ltu,e,b); }
+      else { if (b->i == Num && e->i == Num) e[2].i = b[2].i > e[2].i; else node(Lt,e,b); }
       ty = INT;
       continue;
 
     case Le:
-      next(); expr(Shl); 
-      if ((t & PAMASK) && (ty & PAMASK)) { if (*b == Num && *e == Num) e[2] = (uint) b[2] <= e[2]; else node(Geu,e,b); }
+      next(); expr(Shl);
+      if ((t & PAMASK) && (ty & PAMASK)) { if (b->i == Num && e->i == Num) e[2].i = b[2].u <= e[2].u; else node(Geu,e,b); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to <=");
       else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) { *e = Num; e[2] = *(double *)(b+2) <= *(double *)(d+2); } else node(Gef,d,b);
-      } else if (tt & UINT) { if (*b == Num && *e == Num) e[2] = (uint) b[2] <= e[2]; else node(Geu,e,b); }
-      else { if (*b == Num && *e == Num) e[2] = b[2] <= e[2]; else node(Ge,e,b); }
+        if (b->i == Numf && d->i == Numf) { e->i = Num; e[2].i = *(double *)(b+2) <= *(double *)(d+2); } else node(Gef,d,b);
+      } else if (tt & UINT) { if (b->i == Num && e->i == Num) e[2].i = b[2].u <= e[2].u; else node(Geu,e,b); }
+      else { if (b->i == Num && e->i == Num) e[2].i = b[2].i <= e[2].i; else node(Ge,e,b); }
       ty = INT;
       continue;
 
     case Ge:
-      next(); expr(Shl); 
-      if ((t & PAMASK) && (ty & PAMASK)) { if (*b == Num && *e == Num) e[2] = (uint) b[2] >= e[2]; else node(Geu,b,e); }
+      next(); expr(Shl);
+      if ((t & PAMASK) && (ty & PAMASK)) { if (b->i == Num && e->i == Num) e[2].i = b[2].u >= e[2].u; else node(Geu,b,e); }
       else if ((tt=t|ty) >= STRUCT) err("bad operands to >=");
       else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) { *e = Num; e[2] = *(double *)(b+2) >= *(double *)(d+2); } else node(Gef,b,d);
-      } else if (tt & UINT) { if (*b == Num && *e == Num) e[2] = (uint) b[2] >= e[2]; else node(Geu,b,e); }
-      else { if (*b == Num && *e == Num) e[2] = b[2] >= e[2]; else node(Ge,b,e); }
-      ty = INT;      
+        if (b->i == Numf && d->i == Numf) { e->i = Num; e[2].i = *(double *)(b+2) >= *(double *)(d+2); } else node(Gef,b,d);
+      } else if (tt & UINT) { if (b->i == Num && e->i == Num) e[2].i = b[2].u >= e[2].u; else node(Geu,b,e); }
+      else { if (b->i == Num && e->i == Num) e[2].i = b[2].i >= e[2].i; else node(Ge,b,e); }
+      ty = INT;
       continue;
 
     case Shl:
       next(); expr(Add);
       if ((tt=t|ty) >= FLOAT) err("bad operands to <<");
-      else { if (*b == Num && *e == Num) e[2] = b[2] << e[2]; else node(Shl,b,e); ty = (tt & UINT) ? UINT : INT; }
+      else { if (b->i == Num && e->i == Num) e[2].i = b[2].i << e[2].i; else node(Shl,b,e); ty = (tt & UINT) ? UINT : INT; }
       continue;
 
     case Shr:
       next(); expr(Add);
       if ((tt=t|ty) >= FLOAT) err("bad operands to >>");
-      else if (tt & UINT) { if (*b == Num && *e == Num) e[2] = (uint)b[2] >> e[2]; else node(Sru,b,e); ty = UINT; }
-      else { if (*b == Num && *e == Num) e[2] = b[2] >> e[2]; else node(Shr,b,e); ty = INT; }
+      else if (tt & UINT) { if (b->i == Num && e->i == Num) e[2].u = b[2].u >> e[2].i; else node(Sru,b,e); ty = UINT; }
+      else { if (b->i == Num && e->i == Num) e[2].i = b[2].i >> e[2].i; else node(Shr,b,e); ty = INT; }
       continue;
 
     case Add:
       next(); expr(Mul);
-      if ((t & PAMASK) && ty <= UINT) { if ((tt = tinc(t)) > 1) { *(e-=4) = Num; e[2] = tt; mul(e+4); } add(b); ty = t; }
+      if ((t & PAMASK) && ty <= UINT) { if ((tt = tinc(t)) > 1) { (e-=4)->i = Num; e[2].i = tt; mul(e+4); } add(b); ty = t; }
       else if ((ty & PAMASK) && t <= UINT)
-        { if ((tt = tinc(ty)) > 1) { d = e; *(e-=4) = Num; e[2] = tt; mul(b); add(d); } else add(b); } // XXX refactor?
+        { if ((tt = tinc(ty)) > 1) { d = e; (e-=4)->i = Num; e[2].i = tt; mul(b); add(d); } else add(b); } // XXX refactor?
       else if ((tt=t|ty) >= STRUCT) err("bad operands to +");
       else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) {
-          *e = Numf; *(double *)(e+2) = *(double *)(b+2) + *(double *)(d+2);
+        if (b->i == Numf && d->i == Numf) {
+          e->i = Numf; *(double *)(e+2) = *(double *)(b+2) + *(double *)(d+2);
         } else nodc(Addf,b,d);
         ty = DOUBLE;
       } else { add(b); ty = (tt & UINT) ? UINT : INT; }
@@ -1365,22 +1376,22 @@ void expr(int lev)
       if ((t & PAMASK) && (ty & PAMASK) && (tt=tinc(t)) == tinc(ty)) {
         node(Sub,b,e);
         d = e;
-        *(e-=4) = Num; e[2] = tt;
+        (e-=4)->i = Num; e[2].i = tt;
         node(Div,d,e);
         ty = INT;
       } else if ((t & PAMASK) && ty <= UINT) {
-        if ((tt = tinc(t)) > 1) { *(e-=4) = Num; e[2] = tt; mul(e+4); }
-        if (*e == Num) { e[2] *= -1; add(b); } else node(Sub,b,e);
+        if ((tt = tinc(t)) > 1) { (e-=4)->i = Num; e[2].i = tt; mul(e+4); }
+        if (e->i == Num) { e[2].i *= -1; add(b); } else node(Sub,b,e);
         ty = t;
       } else if ((tt=t|ty) >= STRUCT) err("bad operands to -");
       else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) {
-          *e = Numf; *(double *)(e+2) = *(double *)(b+2) - *(double *)(d+2);
+        if (b->i == Numf && d->i == Numf) {
+          e->i = Numf; *(double *)(e+2) = *(double *)(b+2) - *(double *)(d+2);
         } else node(Subf,b,d);
         ty = DOUBLE;
       } else {
-        if (*e == Num) { e[2] *= -1; add(b); } else node(Sub,b,e);
+        if (e->i == Num) { e[2].i *= -1; add(b); } else node(Sub,b,e);
         ty = (tt & UINT) ? UINT : INT;
       }
       continue;
@@ -1390,8 +1401,8 @@ void expr(int lev)
       if ((tt=t|ty) >= STRUCT) err("bad operands to *");
       else if (tt & FLOAT) {
         d = flot(e,ty); b = flot(b,t);
-        if (*b == Numf && *d == Numf) {
-          *e = Numf; *(double *)(e+2) = *(double *)(b+2) * *(double *)(d+2);
+        if (b->i == Numf && d->i == Numf) {
+          e->i = Numf; *(double *)(e+2) = *(double *)(b+2) * *(double *)(d+2);
         } else nodc(Mulf,b,d);
         ty = DOUBLE;
       } else { mul(b); ty = (tt & UINT) ? UINT : INT; }
@@ -1401,33 +1412,33 @@ void expr(int lev)
       next(); expr(Inc);
       if ((tt=t|ty) >= STRUCT) err("bad operands to /");
       else if (tt & FLOAT) {
-        d = flot(e,ty); b = flot(b,t); 
-        if (*b == Numf && *d == Numf && *(double *)(d+2)) {
-          *e = Numf; *(double *)(e+2) = *(double *)(b+2) / *(double *)(d+2);
+        d = flot(e,ty); b = flot(b,t);
+        if (b->i == Numf && d->i == Numf && *(double *)(d+2)) {
+          e->i = Numf; *(double *)(e+2) = *(double *)(b+2) / *(double *)(d+2);
         } else node(Divf,b,d);
         ty = DOUBLE;
-      } 
-      else if (tt & UINT) { if (*b == Num && *e == Num && e[2]) e[2] = b[2] / (uint)e[2]; else node(Dvu,b,e); ty = UINT; }
-      else { if (*b == Num && *e == Num && e[2]) e[2] = b[2] / e[2]; else node(Div,b,e); ty = INT; }
+      }
+      else if (tt & UINT) { if (b->i == Num && e->i == Num && e[2].u) e[2].u = b[2].u / e[2].u; else node(Dvu,b,e); ty = UINT; }
+      else { if (b->i == Num && e->i == Num && e[2].i) e[2].i = b[2].i / e[2].i; else node(Div,b,e); ty = INT; }
       continue;
 
     case Mod:
       next(); expr(Inc);
       if ((tt=t|ty) >= FLOAT) err("bad operands to %");
-      else if (tt & UINT) { if (*b == Num && *e == Num && e[2]) e[2] = b[2] % (uint)e[2]; else node(Mdu,b,e); ty = UINT; }
-      else { if (*b == Num && *e == Num && e[2]) e[2] = b[2] % e[2]; else node(Mod,b,e); ty = INT; }
+      else if (tt & UINT) { if (b->i == Num && e->i == Num && e[2].u) e[2].u = b[2].u % e[2].u; else node(Mdu,b,e); ty = UINT; }
+      else { if (b->i == Num && e->i == Num && e[2].i) e[2].i = b[2].i % e[2].i; else node(Mod,b,e); ty = INT; }
       continue;
 
     case Inc:
       next();
       if (!(ty & PMASK) && ty >= FLOAT) err("bad operand to ++"); // XXX doesn't support floats
-      else { *(e-=4) = Num; e[2] = -tinc(ty); *(e-=2) = Suba; e[1] = (int)b; add(e+2); } 
+      else { (e-=4)->i = Num; e[2].i = -tinc(ty); (e-=2)->i = Suba; e[1].n = b; add(e+2); }
       continue;
 
     case Dec:
       next();
       if (!(ty & PMASK) && ty >= FLOAT) err("bad operand to --"); // XXX doesn't support floats
-      else { *(e-=4) = Num; e[2] = tinc(ty); *(e-=2) = Suba; e[1] = (int)b; add(e+2); }
+      else { (e-=4)->i = Num; e[2].i = tinc(ty); (e-=2)->i = Suba; e[1].n = b; add(e+2); }
       continue;
 
     case Dot: // XXX do some optimization for x.y on stack or global, then work on x.y.z (cause it wont be done in rval or lval)
@@ -1441,10 +1452,10 @@ void expr(int lev)
       next();
       continue;
 found:
-      *(e-=4) = Num; e[2] = m->offset;
+      (e-=4)->i = Num; e[2].i = m->offset;
       add(e+4);
       if ((m->type & TMASK) == ARRAY) ty = m->type;
-      else { ty = m->type + PTR; ind(); }      
+      else { ty = m->type + PTR; ind(); }
       next();
       continue;
 
@@ -1453,9 +1464,9 @@ found:
       expr(Comma);
       skip(']');
       d = e;
-      *(e-=4) = Num; e[2] = tinc(t);
+      (e-=4)->i = Num; e[2].i = tinc(t);
       mul(d);
-      add(b); 
+      add(b);
       ty = t;
       ind();
       continue;
@@ -1474,7 +1485,7 @@ found:
         case 3: cast(UINT); ty = UINT;
         }
         tt >>= 2;
-        *(e-=2) = (int)b; e[1] = ty; b = e;
+        (e-=2)->n = b; e[1].i = ty; b = e;
         if (tk == Comma) next();
       }
       skip(')');
@@ -1494,11 +1505,11 @@ int lmod(int t)
   switch (t) {
   default: if (!(t & PMASK) && (t & TMASK) != FUN) err("can't dereference that type");
   case INT:
-  case UINT:   return 0; 
+  case UINT:   return 0;
   case SHORT:  return LLS - LL;
-  case USHORT: return LLH - LL; 
+  case USHORT: return LLH - LL;
   case CHAR:   return LLC - LL;
-  case UCHAR:  return LLB - LL; 
+  case UCHAR:  return LLB - LL;
   case DOUBLE: return LLD - LL;
   case FLOAT:  return LLF - LL;
   }
@@ -1509,7 +1520,7 @@ int smod(int t)
   switch (t) {
   default: if (!(t & PMASK)) err("can't dereference that type");
   case INT:
-  case UINT:   return 0; 
+  case UINT:   return 0;
   case SHORT:
   case USHORT: return SLH - SL;
   case CHAR:
@@ -1519,12 +1530,12 @@ int smod(int t)
   }
 }
 
-void lbf(int *b)
+void lbf(N b)
 {
   double d;
-  switch (*b) {
-  case Auto: eml(LBL+lmod(b[1]), b[2]); return;
-  case Static: emg(LBG+lmod(b[1]), b[2]); return;
+  switch (b->i) {
+  case Auto: eml(LBL+lmod(b[1].i), b[2].i); return;
+  case Static: emg(LBG+lmod(b[1].i), b[2].i); return;
   case Numf:
     d = *(double*)(b+2);
     if (((int)(d*256)<<8>>8)/256 == d) emi(LBIF, d*256);
@@ -1534,16 +1545,16 @@ void lbf(int *b)
   }
 }
 
-void opf(int *a)
+void opf(N a)
 {
-  int *b = (int *)a[2];
-  switch (*b) {
+  N b = a[2].n;
+  switch (b->i) {
   case Auto:
   case Static:
-  case Numf: rv((int *)a[1]); lbf(b); return;
+  case Numf: rv(a[1].n); lbf(b); return;
   default:
     rv(b);
-    switch (*(a=(int *)a[1])) {
+    switch ((a=a[1].n)->i) {
     case Auto:
     case Static:
     case Numf: em(LBAD); rv(a); return;
@@ -1551,32 +1562,32 @@ void opf(int *a)
     }
   }
 }
-void opaf(int *a, int o, int comm)
+void opaf(N a, int o, int comm)
 {
-  int t, *b = a + 2;
-  a = (int *)a[1];
-  t = a[1] == FLOAT || a[1] == DOUBLE; // XXX need more testing before confident
-  switch (*a) {
+  int t; N b = a+2;
+  a = a[1].n;
+  t = a[1].i == FLOAT || a[1].i == DOUBLE; // XXX need more testing before confident
+  switch (a->i) {
   case Auto: // loc fop= expr
-    if (comm && t) { rv(b); eml(LBL+lmod(a[1]),a[2]); }
-    else { lbf(b); eml(LL+lmod(a[1]),a[2]); if (!t) em(a[1] < UINT ? CID : CUD); }
-    em(o); if (!t) em(a[1] < UINT ? CDI : CDU); eml(SL+smod(a[1]),a[2]);
+    if (comm && t) { rv(b); eml(LBL+lmod(a[1].i),a[2].i); }
+    else { lbf(b); eml(LL+lmod(a[1].i),a[2].i); if (!t) em(a[1].i < UINT ? CID : CUD); }
+    em(o); if (!t) em(a[1].i < UINT ? CDI : CDU); eml(SL+smod(a[1].i),a[2].i);
     return;
-  case Static: // glo fop= expr  
-    if (comm && t) { rv(b); emg(LBG+lmod(a[1]),a[2]); }
-    else { lbf(b); emg(LG+lmod(a[1]),a[2]); if (!t) em(a[1] < UINT ? CID : CUD); }
-    em(o); if (!t) em(a[1] < UINT ? CDI : CDU); emg(SG+smod(a[1]),a[2]);
+  case Static: // glo fop= expr
+    if (comm && t) { rv(b); emg(LBG+lmod(a[1].i),a[2].i); }
+    else { lbf(b); emg(LG+lmod(a[1].i),a[2].i); if (!t) em(a[1].i < UINT ? CID : CUD); }
+    em(o); if (!t) em(a[1].i < UINT ? CDI : CDU); emg(SG+smod(a[1].i),a[2].i);
     return;
   case Ptr:
-    switch (*b) {
+    switch (b->i) {
     case Auto:
     case Static:
     case Numf: rv(a+2); lbf(b); loc -= 8; break; // *expr fop= simple
     default: rv(b); loc -= 8; em(PSHF); rv(a+2); em(POPG); break; // *expr fop= expr
     }
-    em(PSHA); em(LX+lmod(a[1]));
-    if (!t) em(a[1] < UINT ? CID : CUD);
-    em(o); em(POPB); loc += 8; if (!t) em(a[1] < UINT ? CDI : CDU); em(SX+smod(a[1]));
+    em(PSHA); em(LX+lmod(a[1].i));
+    if (!t) em(a[1].i < UINT ? CID : CUD);
+    em(o); em(POPB); loc += 8; if (!t) em(a[1].i < UINT ? CDI : CDU); em(SX+smod(a[1].i));
     return;
   default: err("lvalue expected");
   }
@@ -1584,26 +1595,26 @@ void opaf(int *a, int o, int comm)
 
 void lbi(int i) { if (i<<8>>8 == i) emi(LBI,i); else { emi(LBI,i>>24); emi(LBHI,i<<8>>8); } }
 
-void lb(int *b)
+void lb(N b)
 {
-  switch (*b) {
-  case Auto: eml(LBL+lmod(b[1]), b[2]); return;
-  case Static: emg(LBG+lmod(b[1]), b[2]); return;
-  case Num: lbi(b[2]); return;
+  switch (b->i) {
+  case Auto: eml(LBL+lmod(b[1].i), b[2].i); return;
+  case Static: emg(LBG+lmod(b[1].i), b[2].i); return;
+  case Num: lbi(b[2].i); return;
   default: rv(b); em(LBA); return;
   }
 }
 
-void opt(int *a)
+void opt(N a)
 {
-  int *b = (int *)a[2];
-  switch (*b) {
+  N b = a[2].n;
+  switch (b->i) {
   case Auto:
   case Static:
-  case Num: rv((int *)a[1]); lb(b); return;
+  case Num: rv(a[1].n); lb(b); return;
   default:
     rv(b);
-    switch (*(a=(int *)a[1])) {
+    switch ((a=a[1].n)->i) {
     case Auto:
     case Static:
     case Num: em(LBA); rv(a); return;
@@ -1616,66 +1627,67 @@ enum { OPI = ADDI - ADD, OPL = ADDL - ADD };
 
 void opi(int o, int i) { if (i<<8>>8 == i) emi(o+OPI, i); else { emi(LBI,i>>24); emi(LBHI,i<<8>>8); em(o); } }
 
-void op(int *a, int o)
+void op(N a, int o)
 {
-  int t, *b = (int *)a[2];
-  switch (*b) {
-  case Auto: rv((int *)a[1]); if (t = lmod(b[1])) { eml(LBL+t, b[2]); em(o); } else eml(o+OPL, b[2]); return;
-  case Static: rv((int *)a[1]); emg(LBG+lmod(b[1]), b[2]); em(o); return;
-  case Num: rv((int *)a[1]); opi(o,b[2]); return;
+  int t;
+  N b = a[2].n;
+  switch (b->i) {
+  case Auto: rv(a[1].n); if (t = lmod(b[1].i)) { eml(LBL+t, b[2].i); em(o); } else eml(o+OPL, b[2].i); return;
+  case Static: rv(a[1].n); emg(LBG+lmod(b[1].i), b[2].i); em(o); return;
+  case Num: rv(a[1].n); opi(o,b[2].i); return;
   default:
     rv(b);
-    switch (*(a=(int *)a[1])) {
-    case Auto: 
-    case Static: 
+    switch ((a=a[1].n)->i) {
+    case Auto:
+    case Static:
     case Num: em(LBA); rv(a); em(o); return;
     default: loc -= 8; em(PSHA); rv(a); em(POPB); em(o); loc += 8; return;
     }
   }
 }
 
-void opa(int *a, int o, int comm)
+void opa(N a, int o, int comm)
 {
-  int t, *b = a + 2;
-  a = (int *)a[1];
-  switch (*a) {
+  int t; N b = a+2;
+  a = a[1].n;
+  switch (a->i) {
   case Auto:
-    if (*b == Num && b[2]<<8>>8 == b[2]) { eml(LL+lmod(a[1]),a[2]); emi(o+OPI,b[2]); } // loc op= num
-    else if (*b == Auto && !lmod(b[1]))  { eml(LL+lmod(a[1]),a[2]); eml(o+OPL,b[2]); } // loc op= locint
-    else if (comm) { rv(b); if (t = lmod(a[1])) { eml(LBL+t,a[2]); em(o); } else eml(o+OPL,a[2]); } // loc comm= expr
-    else { lb(b); eml(LL+lmod(a[1]),a[2]); em(o); } // loc op= expr
-    eml(SL+smod(a[1]),a[2]);
+    if (b->i == Num && b[2].i<<8>>8 == b[2].i) { eml(LL+lmod(a[1].i),a[2].i); emi(o+OPI,b[2].i); } // loc op= num
+    else if (b->i == Auto && !lmod(b[1].i))  { eml(LL+lmod(a[1].i),a[2].i); eml(o+OPL,b[2].i); } // loc op= locint
+    else if (comm) { rv(b); if (t = lmod(a[1].i)) { eml(LBL+t,a[2].i); em(o); } else eml(o+OPL,a[2].i); } // loc comm= expr
+    else { lb(b); eml(LL+lmod(a[1].i),a[2].i); em(o); } // loc op= expr
+    eml(SL+smod(a[1].i),a[2].i);
     return;
   case Static:
-    if (*b == Num && b[2]<<8>>8 == b[2]) { emg(LG+lmod(a[1]),a[2]); emi(o+OPI,b[2]); } // glo op= num
-    else if (*b == Auto && !lmod(b[1]))  { emg(LG+lmod(a[1]),a[2]); eml(o+OPL,b[2]); } // glo op= locint
-    else if (comm) { rv(b); emg(LBG+lmod(a[1]),a[2]); em(o); } // glo comm= expr
-    else { lb(b); emg(LG+lmod(a[1]),a[2]); em(o); } // glo op= expr
-    emg(SG+smod(a[1]),a[2]);
+    if (b->i == Num && b[2].i<<8>>8 == b[2].i) { emg(LG+lmod(a[1].i),a[2].i); emi(o+OPI,b[2].i); } // glo op= num
+    else if (b->i == Auto && !lmod(b[1].i))  { emg(LG+lmod(a[1].i),a[2].i); eml(o+OPL,b[2].i); } // glo op= locint
+    else if (comm) { rv(b); emg(LBG+lmod(a[1].i),a[2].i); em(o); } // glo comm= expr
+    else { lb(b); emg(LG+lmod(a[1].i),a[2].i); em(o); } // glo op= expr
+    emg(SG+smod(a[1].i),a[2].i);
     return;
-  case Ptr: 
-    if (*b == Num && b[2]<<8>>8 == b[2]) { rv(a+2); em(LBA); em(LX+lmod(a[1])); emi(o+OPI,b[2]); } // *expr op= num
-    else if (*b == Auto && !lmod(b[1]))  { rv(a+2); em(LBA); em(LX+lmod(a[1])); eml(o+OPL,b[2]); } // *expr op= locint
+  case Ptr:
+    if (b->i == Num && b[2].i<<8>>8 == b[2].i) { rv(a+2); em(LBA); em(LX+lmod(a[1].i)); emi(o+OPI,b[2].i); } // *expr op= num
+    else if (b->i == Auto && !lmod(b[1].i))  { rv(a+2); em(LBA); em(LX+lmod(a[1].i)); eml(o+OPL,b[2].i); } // *expr op= locint
     else {
-      switch (*b) {
+      switch (b->i) {
       case Auto:
       case Static:
-      case Num: rv(a+2); lb(b); loc -= 8; em(PSHA); em(LX+lmod(a[1])); em(o); em(POPB); loc += 8; break; // *expr op= simple
-      default: rv(b); loc -= 8; em(PSHA); rv(a+2); em(LBA); em(LX+lmod(a[1])); em(o+OPL); emi(ENT,8); loc += 8; // *expr op= expr
-      }    
+      case Num: rv(a+2); lb(b); loc -= 8; em(PSHA); em(LX+lmod(a[1].i)); em(o); em(POPB); loc += 8; break; // *expr op= simple
+      default: rv(b); loc -= 8; em(PSHA); rv(a+2); em(LBA); em(LX+lmod(a[1].i)); em(o+OPL); emi(ENT,8); loc += 8; // *expr op= expr
+      }
     }
-    em(SX+smod(a[1])); // XXX many more (SX,imm) optimizations possible (here and elsewhere)
+    em(SX+smod(a[1].i)); // XXX many more (SX,imm) optimizations possible (here and elsewhere)
     return;
   default: err("lvalue expected");
-  }  
+  }
 }
 
-int testnot(int *a, int t);
+int testnot(N a, int t);
 
-int test(int *a, int t)
+int test(N a, int t)
 {
   int b;
-  switch (*a) {
+  switch (a->i) {
   case Eq:  opt(a); return emf(BE,  t);
   case Ne:  opt(a); return emf(BNE, t);
   case Lt:  opt(a); return emf(BLT, t);
@@ -1686,21 +1698,21 @@ int test(int *a, int t)
   case Nef: opf(a); return emf(BNEF,t);
   case Ltf: opf(a); return emf(BLTF,t);
   case Gef: opf(a); return emf(BGEF,t);
-  case Lor: return test(a+2,test((int *)a[1],t));
-  case Lan: b = testnot((int *)a[1],0); t = test(a+2,t); patch(b,ip); return t;
+  case Lor: return test(a+2,test(a[1].n,t));
+  case Lan: b = testnot(a[1].n,0); t = test(a+2,t); patch(b,ip); return t;
   case Not: return testnot(a+2,t);
   case Notf: rv(a+2); return emf(BZF,t);
   case Nzf: rv(a+2); return emf(BNZF,t);
-  case Num: if (a[2]) return emf(JMP,t); return t;
+  case Num: if (a[2].i) return emf(JMP,t); return t;
   case Numf: if (*(double*)(a+2)) return emf(JMP,t); return t;
   default: rv(a); return emf(BNZ,t);
   }
 }
 
-int testnot(int *a, int t)
+int testnot(N a, int t)
 {
   int b;
-  switch (*a) {
+  switch (a->i) {
   case Eq:  opt(a); return emf(BNE, t);
   case Ne:  opt(a); return emf(BE,  t);
   case Lt:  opt(a); return emf(BGE, t);
@@ -1711,23 +1723,23 @@ int testnot(int *a, int t)
   case Nef: opf(a); return emf(BEF, t);
   case Ltf: opf(a); return emf(BGEF,t);
   case Gef: opf(a); return emf(BLTF,t);
-  case Lor: b = test((int *)a[1],0); t = testnot(a+2,t); patch(b,ip); return t;
-  case Lan: return testnot(a+2,testnot((int *)a[1],t));
+  case Lor: b = test(a[1].n,0); t = testnot(a+2,t); patch(b,ip); return t;
+  case Lan: return testnot(a+2,testnot(a[1].n,t));
   case Not: return test(a+2,t);
   case Notf: rv(a+2); return emf(BNZF,t);
   case Nzf: rv(a+2); return emf(BZF,t);
-  case Num: if (!a[2]) return emf(JMP,t); return t;
+  case Num: if (!a[2].i) return emf(JMP,t); return t;
   case Numf: if (!*(double*)(a+2)) return emf(JMP,t); return t;
   default: rv(a); return emf(BZ,t);
   }
 }
 
-void rv(int *a)
+void rv(N a)
 {
-  int c, t, *b; double d;
+  int c, t; N b; double d;
   ident_t *n;
 
-  switch (*a) {
+  switch (a->i) {
   case Addaf: opaf(a, ADDF, 1); return;
   case Subaf: opaf(a, SUBF, 0); return;
   case Mulaf: opaf(a, MULF, 1); return;
@@ -1749,25 +1761,25 @@ void rv(int *a)
 
   case Assign:
     b = a+2;
-    a = (int *)a[1];
-    switch (*a) {
-    case Auto:   rv(b); eml(SL+smod(a[1]), a[2]); return; // loc = expr
-    case Static: rv(b); emg(SG+smod(a[1]), a[2]); return; // glo = expr
+    a = a[1].n;
+    switch (a->i) {
+    case Auto:   rv(b); eml(SL+smod(a[1].i), a[2].i); return; // loc = expr
+    case Static: rv(b); emg(SG+smod(a[1].i), a[2].i); return; // glo = expr
     case Ptr:
-      switch (a[2]) {
-      case Auto:   rv(b); eml(LBL+lmod(a[3]), a[4]); break; // *loc = expr // XXX all good? in the presense of multiple casts?
-      case Static: rv(b); emg(LBG+lmod(a[3]), a[4]); break; // *glo = expr
+      switch (a[2].i) {
+      case Auto:   rv(b); eml(LBL+lmod(a[3].i), a[4].i); break; // *loc = expr // XXX all good? in the presense of multiple casts?
+      case Static: rv(b); emg(LBG+lmod(a[3].i), a[4].i); break; // *glo = expr
       default:
         rv(a+2);
-        switch (*b) {
+        switch (b->i) {
         case Static:
         case Auto:
-        case Num: 
+        case Num:
         case Numf: em(LBA); rv(b); break; // *expr = simple
         default:  loc -= 8; em(PSHA); rv(b); em(POPB); loc += 8; // *expr = expr
         }
       }
-      em(SX+smod(a[1]));
+      em(SX+smod(a[1].i));
       return;
     default: err("lvalue expected"); return;
     }
@@ -1790,7 +1802,7 @@ void rv(int *a)
   case Shl: op(a, SHL); return;
   case Shr: op(a, SHR); return;
   case Sru: op(a, SRU); return;
-  
+
   case Eq:  opt(a); em(EQ); return;
   case Ne:  opt(a); em(NE); return;
   case Lt:  opt(a); em(LT); return;
@@ -1801,9 +1813,9 @@ void rv(int *a)
   case Nef: opf(a); em(NEF); return;
   case Ltf: opf(a); em(LTF); return;
   case Gef: opf(a); em(GEF); return;
-  
-  case Cid: rv((int *)a[1]); em(CID); return;
-  case Cud: rv((int *)a[1]); em(CUD); return;
+
+  case Cid: rv(a[1].n); em(CID); return;
+  case Cud: rv(a[1].n); em(CUD); return;
   case Cdi: rv(a+2); em(CDI); return;
   case Cdu: rv(a+2); em(CDU); return;
   case Cic: rv(a+2); emi(SHLI,24); emi(SHRI,24); return;
@@ -1811,11 +1823,11 @@ void rv(int *a)
   case Cis: rv(a+2); emi(SHLI,16); emi(SHRI,16); return;
   case Cus: rv(a+2); emi(ANDI,0xffff); return;
 
-  case Comma: rv((int *)a[1]); rv(a+2); return;
-  case Cond: t = testnot((int *)a[1],0); rv((int *)a[2]); c = emf(JMP,0); patch(t,ip); rv((int *)a[3]); patch(c,ip); return;
+  case Comma: rv(a[1].n); rv(a+2); return;
+  case Cond: t = testnot(a[1].n,0); rv(a[2].n); c = emf(JMP,0); patch(t,ip); rv(a[3].n); patch(c,ip); return;
 
   case Lor:
-    t = test(a+2,test((int *)a[1],0));
+    t = test(a+2,test(a[1].n,0));
     emi(LI,0);
     c = emf(JMP,0);
     patch(t,ip);
@@ -1824,7 +1836,7 @@ void rv(int *a)
     return;
 
   case Lan:
-    t = testnot(a+2,testnot((int *)a[1],0));
+    t = testnot(a+2,testnot(a[1].n,0));
     emi(LI,1);
     c = emf(JMP,0);
     patch(t,ip);
@@ -1845,7 +1857,7 @@ void rv(int *a)
     return;
 
   case Num:
-    if (a[2]<<8>>8 == a[2]) emi(LI,a[2]); else { emi(LI,a[2]>>24); emi(LHI,a[2]<<8>>8); }
+    if (a[2].i<<8>>8 == a[2].i) emi(LI,a[2].i); else { emi(LI,a[2].i>>24); emi(LHI,a[2].i<<8>>8); }
     return;
 
   case Numf:
@@ -1855,9 +1867,9 @@ void rv(int *a)
     return;
 
   case Ptr:
-    t = a[1];
-    if (a[2] == Add && *(int *)a[4] == Num && (c = ((int *)a[4])[2], c<<8>>8 == c)) {
-      rv((int *)a[3]);
+    t = a[1].i;
+    if (a[2].i == Add && a[4].n->i == Num && (c = a[4].n[2].i, c<<8>>8 == c)) {
+      rv(a[3].n);
       emi(LX+lmod(t),c);
       return;
     }
@@ -1865,36 +1877,36 @@ void rv(int *a)
     em(LX+lmod(t));
     return;
 
-  case Lea:  eml(LEA,  a[2]); return;
-  case Leag: emg(LEAG, a[2]); return;
+  case Lea:  eml(LEA,  a[2].i); return;
+  case Leag: emg(LEAG, a[2].i); return;
 
-  case Auto:   eml(LL+lmod(a[1]), a[2]); return;
-  case Static: emg(LG+lmod(a[1]), a[2]); return;
+  case Auto:   eml(LL+lmod(a[1].i), a[2].i); return;
+  case Static: emg(LG+lmod(a[1].i), a[2].i); return;
 
-  case Fun: emj(LEAG, a[2]); return;
-  
+  case Fun: emj(LEAG, a[2].i); return;
+
   case FFun:
-    n = (ident_t *)a[2];
+    n = (ident_t *)a[2].n;
     n->val = emf(LEAG, n->val);
     return;
 
   case Fcall:
-    b = (int *)a[2];
-    a = (int *)a[1];
+    b = a[2].n;
+    a = a[1].n;
     for (t = 0; b; t += 8) {
-      if (b[1] == DOUBLE || b[1] == FLOAT) { rv(b+2); loc -= 8; em(PSHF); }
-      else if (b[2] == Num && b[4]<<8>>8 == b[4]) { loc -= 8; emi(PSHI,b[4]); }
+      if (b[1].i == DOUBLE || b[1].i == FLOAT) { rv(b+2); loc -= 8; em(PSHF); }
+      else if (b[2].i == Num && b[4].i<<8>>8 == b[4].i) { loc -= 8; emi(PSHI,b[4].i); }
       else { rv(b+2); loc -= 8; em(PSHA); }
-      b = (int *)*b;
+      b = b->n;
     }
-    if (*a == FFun) { n = (ident_t *)a[2]; n->val = emf(JSR, n->val); }
-    else if (*a == Fun) emj(JSR, a[2]);
+    if (a->i == FFun) { n = (ident_t *)a[2].n; n->val = emf(JSR, n->val); }
+    else if (a->i == Fun) emj(JSR, a[2].i);
     else { rv(a); em(JSRA); } // function address
     if (t) { emi(ENT,t); loc += t; }
     return;
 
   default:
-    dprintf(2,"fatal compiler error rv(int *a) *a=%d\n",*a); exit(-1);
+    dprintf(2,"fatal compiler error rv(int *a) *a=%d\n",a->i); exit(-1);
   }
 }
 
@@ -1902,13 +1914,14 @@ void rv(int *a)
 void stmt(void)
 {
   static int brk, cont, def;
-  int a, b, c, d, *es, *et, cmin, cmax;
+  int a, b, c, d, cmin, cmax;
+  N es, et;
 
   switch (tk) {
   case If:
     next(); skip(Paren);
     es = e;
-    expr(Comma); if (ty == DOUBLE || ty == FLOAT) *(e-=2) = Nzf;
+    expr(Comma); if (ty == DOUBLE || ty == FLOAT) (e-=2)->i = Nzf;
     a = testnot(e,0);
     e = es;
     skip(')');
@@ -1929,7 +1942,7 @@ void stmt(void)
     a = ip;
     es = e;
     next(); skip(Paren);
-    expr(Comma); if (ty == DOUBLE || ty == FLOAT) *(e-=2) = Nzf;
+    expr(Comma); if (ty == DOUBLE || ty == FLOAT) (e-=2)->i = Nzf;
     skip(')');
     stmt();
     patch(cont,ip); cont = c;
@@ -1972,7 +1985,7 @@ void stmt(void)
     }
     skip(';');
     es = et = 0;
-    if (tk != ';') { es = e; expr(Comma); if (ty == DOUBLE || ty == FLOAT) *(e-=2) = Nzf; }
+    if (tk != ';') { es = e; expr(Comma); if (ty == DOUBLE || ty == FLOAT) (e-=2)->i = Nzf; }
     skip(';');
     if (tk != ')') { et = e; expr(Comma); }
     skip(')');
@@ -1989,7 +2002,7 @@ void stmt(void)
       patch(test(e,0), a);
       e = es;
     } else
-      emj(JMP, a);
+      emj(JMP, ts+a);
     patch(brk,ip); brk = b;
     return;
 
@@ -2002,7 +2015,7 @@ void stmt(void)
     patch(cont,ip); cont = c;
     skip(While); skip(Paren);
     es = e;
-    expr(Comma); if (ty == DOUBLE || ty == FLOAT) *(e-=2) = Nzf;
+    expr(Comma); if (ty == DOUBLE || ty == FLOAT) (e-=2)->i = Nzf;
     patch(test(e,0), a);
     e = es;
     skip(')'); skip(';');
@@ -2026,22 +2039,22 @@ void stmt(void)
     if (es == e) { //err("no case in switch statement");   XXX
       if (def) emj(JMP, def);
     } else {  // XXX lots of possible signed/unsigned under/overflow issues in this block
-      cmin = cmax = *(et = es - 2);
-      while (et > e) { et -= 2; if ((c = *et) > cmax) cmax = c; else if (c < cmin) cmin = c; }
+      cmin = cmax = (et = es - 2)->i;
+      while (et > e) { et -= 2; if ((c = et->i) > cmax) cmax = c; else if (c < cmin) cmin = c; }
       et = es;
-      if ((uint)(cmax - cmin) <= ((int)es - (int)e)*2) { // jump table
-        if (cmin > 0 && cmax <= (int)es - (int)e) cmin = 0;
+      if ((ulong)(cmax - cmin) <= (es - e)*8) { // jump table
+        if (cmin > 0 && cmax <= (es - e)*4) cmin = 0;
         else if (cmin) { opi(SUB, cmin); cmax -= cmin; }
         lbi(++cmax);
         data = (data + 3) & -4;
-        if (def) { emj(BGEU, def); emg(JMPI, data); def -= ip; }
+        if (def) { emj(BGEU, def); emg(JMPI, data); def -= ts+ip; }
         else { brk = emf(BGEU, brk); emg(JMPI, data); }
         for (c = 0; c < cmax; ) ((int *)(gs + data))[c++] = def;
-        while (et > e) { et -= 2; ((int *)(gs + data))[*et - cmin] = et[1] - ip; }
-        data += cmax * 4;       
+        while (et > e) { et -= 2; ((int *)(gs + data))[et->i - cmin] = et[1].i - (ts+ip); }
+        data += cmax * 4;
       } else { // jump list
 //        printf("jump list at line %d\n",line);
-        while (et > e) { et -= 2; lbi(*et); emj(BE, et[1]); }  // XXX overflow issues?
+        while (et > e) { et -= 2; lbi(et->i); emj(BE, et[1].i); }  // XXX overflow issues?
         if (def) emj(JMP, def);
       }
     }
@@ -2052,11 +2065,11 @@ void stmt(void)
 
   case Case:
     next();
-    a = *(e-=2) = imm(); e[1] = ip;
+    a = (e-=2)->i = imm(); e[1].i = ts+ip;
     if (tk == Dots) {
       next();
       b = imm();
-      while (a < b) { *(e-=2) = ++a; e[1] = ip; }
+      while (a < b) { (e-=2)->i = ++a; e[1].i = ts+ip; }
     }
     skip(':');
     stmt();
@@ -2076,11 +2089,11 @@ void stmt(void)
     skip(Paren);
     es = e;
     expr(Assign);
-    b = (int)e;
+    et = e;
     skip(Comma);
     expr(Assign);
     addr();
-    *(e-=2) = Assign; e[1] = b;
+    (e-=2)->i = Assign; e[1].n = et;
     rv(e);
     e = es;
     skip(')');
@@ -2089,7 +2102,7 @@ void stmt(void)
 
   case Default:
     next(); skip(':');
-    def = ip;
+    def = ts+ip;
     stmt();
     return;
 
@@ -2128,11 +2141,11 @@ void stmt(void)
         ploc->id = id;
         ploc++;
         id->class = Label;
-        id->val = ip;
+        id->val = ts+ip;
       } else if (id->class == FLabel) {
         patch(id->val,ip);
         id->class = Label;
-        id->val = ip;
+        id->val = ts+ip;
       } else
         err("bad label name"); // XXX should let labels override globals just like other locals
       next();
@@ -2151,7 +2164,7 @@ void stmt(void)
 
 int main(int argc, char *argv[])
 {
-  int i, amain, text, *patchdata, *patchbss, sbrk_start;
+  int i, text, *patchdata, *patchbss; long amain, sbrk_start;
   ident_t *tmain;
   char *outfile;
   struct { uint magic, bss, entry, flags; } hdr;
@@ -2172,10 +2185,10 @@ int main(int argc, char *argv[])
     file = *++argv;
   }
 
-  sbrk_start = (int) sbrk(0);
-  ts = ip = (int) new(SEG_SZ);
-  gs      = (int) new(SEG_SZ);
-  va = vp = (int) new(VAR_SZ);
+  sbrk_start = (long) sbrk(0);
+  ts =      (long) new(SEG_SZ); ip = 0;
+  gs      = (long) new(SEG_SZ);
+  va = vp = (long) new(VAR_SZ);
 
   bigend = 1; bigend = ((char *)&bigend)[3];
 
@@ -2199,12 +2212,12 @@ int main(int argc, char *argv[])
   next();
   decl(Static);
   if (!errs && ffun) err("unresolved forward function (retry with -v)");
-    
+
   ip = (ip + 7) & -8;
-  text = ip - ts;
+  text = ip;
   data = (data + 7) & -8;
   bss = (bss + 7) & -8;
-    
+
   if (text + data + bss > SEG_SZ) err("text + data + bss segment exceeds maximum size");
   if (!(amain = tmain->val)) err("main() not defined");
 
@@ -2212,8 +2225,8 @@ int main(int argc, char *argv[])
   if (verbose) dprintf(2,"entry = %d text = %d data = %d bss = %d\n", amain - ts, text, data, bss);
 
   if (!errs && !debug) {
-    while (pdata != patchdata) { pdata--; *(int *)*pdata += (ip        - *pdata - 4) << 8; }
-    while (pbss  != patchbss ) { pbss--;  *(int *)*pbss  += (ip + data - *pbss  - 4) << 8; }
+    while (pdata != patchdata) { pdata--; *(int *)(ts + *pdata) += (ip        - *pdata - 4) << 8; }
+    while (pbss  != patchbss ) { pbss--;  *(int *)(ts + *pbss)  += (ip + data - *pbss  - 4) << 8; }
     if (outfile) {
       if ((i = open(outfile, O_WRONLY | O_CREAT | O_TRUNC)) < 0)
         { dprintf(2,"%s : error: can't open output file %s\n", cmd, outfile); return -1; }
@@ -2226,8 +2239,8 @@ int main(int argc, char *argv[])
       write(i, (void *)gs, data);
       close(i);
     } else {
-      memcpy((void *)ip, (void *)gs, data);
-      sbrk(sbrk_start + text + data + 8 - (int)sbrk(0)); // free compiler memory    
+      memcpy((void *)(ts+ip), (void *)gs, data);
+      sbrk(sbrk_start + text + data + 8 - (long)sbrk(0)); // free compiler memory
       sbrk(bss);
       if (verbose) dprintf(2,"%s : running %s\n", cmd, file);
       errs = ((int (*)())amain)(argc, argv);
