@@ -279,6 +279,7 @@ again:
       continue;
 
     case '#':
+      if (mlevel) { err("bad preprocessor directive"); exit(-1); }
       if (!memcmp(pos,"include",7)) {
         if (ifile) { err("can't nest include files"); exit(-1); } // include errors bail out otherwise it gets messy
         pos += 7;
@@ -316,6 +317,13 @@ again:
         if (tk != Id) { err("bad define"); exit(-1); }
         mlevel = 0;
         id->macro = pos;
+      } else if (!memcmp(pos,"undef",5)) {
+        pos += 5;
+        mlevel = -1;
+        next();
+        if (tk != Id) { err("bad undef"); exit(-1); }
+        mlevel = 0;
+        id->macro = 0;
       }
       while (*pos && *pos != '\n') pos++;
       continue;
@@ -334,7 +342,7 @@ again:
       tk ^= (b = pos - p);
       while (id) {
         if (tk == id->hash && (b < 5 || !memcmp(id->name, p, b))) { // b < 5 dependant on hash func and size
-          if (id->macro) {
+          if (id->macro && mlevel != -1) {
             if (mlevel == MSTACK_SZ) { err("exceeded macro recursion level"); exit(-1); }
             mstack[mlevel++] = pos;
             pos = id->macro;
