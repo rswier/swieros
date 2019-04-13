@@ -37,6 +37,7 @@ enum {
   PSTACK_SZ =     64*1024, // size of patch stacks
   LSTACK_SZ =      4*1024, // size of locals stack
   HASH_SZ   =      8*1024, // number of hash table entries
+  MSTACK_SZ =          16, // number of #define macro recursion levels
   BSS_TAG   =  0x10000000, // tag for patching global offsets
 };
 
@@ -47,6 +48,7 @@ typedef struct ident_s {
   int local;
   uint tk;
   char *name;
+  char *macro;
   int hash;
   struct ident_s *next;
 } ident_t;
@@ -259,13 +261,20 @@ void next(void)
   static char iname[512], *ifile, *ipos; // XXX 512
   static int iline;
   static ident_t *ht[HASH_SZ];
+  static char *mstack[MSTACK_SZ];
+  static int mlevel;
 
+again:
   for (;;) {
     switch (tk = *pos++) {
     case ' ': case '\t': case '\v': case '\r': case '\f':
       continue;
 
     case '\n':
+      if (mlevel) {
+         pos = mstack[--mlevel];
+         continue;
+      }
       line++; if (debug) dline();
       continue;
 
@@ -300,6 +309,13 @@ void next(void)
         iline = line; line = 1;
         if (debug) dline();
         continue;
+      } else if (!memcmp(pos,"define",6)) {
+        pos += 6;
+        mlevel = -1;
+        next();
+        if (tk != Id) { err("bad define"); exit(-1); }
+        mlevel = 0;
+        id->macro = pos;
       }
       while (*pos && *pos != '\n') pos++;
       continue;
@@ -317,7 +333,16 @@ void next(void)
       id = *(hm = &ht[tk & (HASH_SZ - 1)]);
       tk ^= (b = pos - p);
       while (id) {
-        if (tk == id->hash && (b < 5 || !memcmp(id->name, p, b))) { tk = id->tk; return; } // b < 5 dependant on hash func and size
+        if (tk == id->hash && (b < 5 || !memcmp(id->name, p, b))) { // b < 5 dependant on hash func and size
+          if (id->macro) {
+            if (mlevel == MSTACK_SZ) { err("exceeded macro recursion level"); exit(-1); }
+            mstack[mlevel++] = pos;
+            pos = id->macro;
+            goto again;
+          }
+          tk = id->tk;
+          return;
+        }
         id = id->next;
       }
       id = (ident_t *) vp; vp += sizeof(ident_t);

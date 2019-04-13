@@ -1,8 +1,11 @@
 #include <u.h>
 #include <libc.h>
 
+#define YY printf
+#define XX YY("hello world.\n")
+
 int main()
 {
-  printf("hello world.\n");
+  XX;
   return 0;
 }
