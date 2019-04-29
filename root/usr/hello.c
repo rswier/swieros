@@ -8,9 +8,10 @@ YY(char *s)
 
 #define YY printf
 #define XX YY("hello world.\n")
+#define const
 
 
-int main()
+const int main()
 {
   XX;
 #define XX YY("hello\n")

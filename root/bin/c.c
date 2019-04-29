@@ -33,7 +33,7 @@
 enum {
   SEG_SZ    = 8*1024*1024, // max size of text+data+bss seg
   EXPR_SZ   =      4*1024, // size of expression stack
-  VAR_SZ    =     64*1024, // size of symbol table
+  VAR_SZ    =    256*1024, // size of symbol table
   PSTACK_SZ =     64*1024, // size of patch stacks
   LSTACK_SZ =      4*1024, // size of locals stack
   HASH_SZ   =      8*1024, // number of hash table entries
@@ -403,7 +403,10 @@ frac:     b = 10;
 
     case '/':
       if (*pos == '/') { // single line comment
-        while (*++pos != '\n' && *pos);
+        while (*++pos) {
+          if (*pos == '\n') break;
+          else if (*pos == '\\' && pos[1] == '\n') { pos++; line++; if (debug) { pos++; dline(); pos--; } }
+        }
         continue;
       } else if (*pos == '*') { // comment
         while (*++pos) {
@@ -806,7 +809,7 @@ void decl(int bc)
         break;
       } else if ((t & TMASK) == FUN) {
 //        if (bc != Static || sc != Static) err("bad nested function declaration");
-        if (v->class) err("duplicate function declaration");
+        if (v->class && v->class != FFun) err("duplicate function declaration");
         v->class = FFun;
         v->type = t;
         ffun++;
@@ -904,7 +907,7 @@ void decl(int bc)
 
 void member(int stype, struct_t *s)
 {
-  int size, align, ssize = 0, salign = 1; uint bt, t; ident_t *v; member_t *m, **mp;
+  int size, align, ssize = 0, salign = 1; uint bt, t; ident_t *v; member_t *m, **mp; loc_t *sp;
 
   while (tk && tk != '}') {
     if (!(bt = basetype())) bt = INT;
@@ -912,6 +915,7 @@ void member(int stype, struct_t *s)
     if (tk == ';') { next(); continue; } // XXX
     for (;;) {
       v = 0; t = 0;
+      sp = ploc;
       type(&t, &v, bt);
       if (!v) err("bad member declaration");
       else {
@@ -926,6 +930,14 @@ void member(int stype, struct_t *s)
         else if (size > ssize)
           ssize = size;
         if (align > salign) salign = align;
+      }
+      while (ploc != sp) {
+        ploc--;
+        v = ploc->id;
+        v->val = ploc->val;
+        v->type = ploc->type;
+        v->class = ploc->class;
+        v->local = 0;
       }
       if (tk != Comma) {
         skip(';');
