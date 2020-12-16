@@ -734,7 +734,7 @@ uint *type(uint *t, ident_t **v, uint bt)
         }
       }
       pt |= (d == DOUBLE ? 1 : (d < UINT ? 2 : 3)) << p*2;
-      if (tk == Comma) next(); // XXX desparately need to flag an error if not a comma or close paren!
+      if (tk == Comma) next(); // XXX desperately need to flag an error if not a comma or close paren!
       if (tk == Dots) { next(); if (tk != ')') err("expecting close parens after dots"); break; }
     }
     next(); // skip ')'
